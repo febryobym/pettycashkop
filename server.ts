@@ -13,8 +13,14 @@ async function startServer() {
   app.use(express.json());
 
   // Gemini Setup
-  const genAI = new (GoogleGenAI as any)(process.env.GEMINI_API_KEY || "");
-  const model = (genAI as any).getGenerativeModel({ model: "gemini-2.0-flash" });
+  const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY || "",
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  });
 
   // API Routes
   app.post("/api/insights", async (req, res) => {
@@ -29,8 +35,11 @@ async function startServer() {
          Keep it professional and helpful.
       `;
 
-      const result = await model.generateContent(prompt);
-      const text = result.response.text();
+      const result = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+      });
+      const text = result.text;
       res.json({ insights: text });
     } catch (error) {
       console.error("Gemini Error:", error);

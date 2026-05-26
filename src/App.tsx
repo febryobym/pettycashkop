@@ -530,7 +530,7 @@ function StatCard({ label, value, icon, color, isCount }: { label: string, value
   );
 }
 
-function TransactionRow({ transaction, category, accounts, onDelete, onEdit, showActions }: { transaction: Transaction, category?: Category, accounts: Account[], onDelete: (id: string) => void, onEdit?: (t: Transaction) => void, showActions?: boolean }) {
+function TransactionRow({ transaction, category, accounts, onDelete, onEdit, showActions }: { transaction: Transaction, category?: Category, accounts: Account[], onDelete: (id: string) => void, onEdit?: (t: Transaction) => void, showActions?: boolean, key?: any }) {
   const fromAcc = accounts.find(a => a.id === transaction.accountId);
   const toAcc = accounts.find(a => a.id === transaction.toAccountId);
 
