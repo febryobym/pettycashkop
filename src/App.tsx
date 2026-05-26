@@ -706,31 +706,6 @@ function TransactionRow({
   );
 }
 
-const RADIAN = Math.PI / 180;
-const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
-  const radius = innerRadius + (outerRadius - innerRadius) * 0.55;
-  const x = cx + radius * Math.cos(-midAngle * RADIAN);
-  const y = cy + radius * Math.sin(-midAngle * RADIAN);
-
-  if (percent < 0.03) return null;
-
-  return (
-    <text 
-      x={x} 
-      y={y} 
-      fill="#ffffff" 
-      textAnchor="middle" 
-      dominantBaseline="central"
-      className="text-[11px] font-black tracking-tighter"
-      style={{
-        textShadow: '0 1px 2px rgba(0,0,0,0.4)'
-      }}
-    >
-      {`${(percent * 100).toFixed(0)}%`}
-    </text>
-  );
-};
-
 function ExpenseChart({ transactions, categories }: { transactions: Transaction[], categories: Category[] }) {
   const expenseData = categories.map(cat => {
     const total = transactions
@@ -754,15 +729,13 @@ function ExpenseChart({ transactions, categories }: { transactions: Transaction[
           data={expenseData}
           cx="50%"
           cy="45%"
-          innerRadius={30}
-          outerRadius={95}
-          paddingAngle={3}
+          innerRadius={60}
+          outerRadius={85}
+          paddingAngle={5}
           dataKey="value"
-          labelLine={false}
-          label={renderCustomizedLabel}
         >
           {expenseData.map((entry, index) => (
-            <Cell key={`cell-${index}`} fill={entry.color} strokeWidth={1} stroke="#fff" />
+            <Cell key={`cell-${index}`} fill={entry.color} strokeWidth={0} />
           ))}
         </Pie>
         <Tooltip 
