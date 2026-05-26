@@ -1,0 +1,8 @@
+{
+  "name": "PettyCash Pro",
+  "description": "A streamlined petty cash management system with custom categories, monthly reporting, and Excel export capabilities.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
