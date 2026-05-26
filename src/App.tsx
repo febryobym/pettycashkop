@@ -123,7 +123,7 @@ export default function App() {
   const filteredTransactions = transactions.filter(t => {
     const date = parseISO(t.date);
     const dateMatch = date.getMonth() === filterMonth && date.getFullYear() === filterYear;
-    const accountMatch = activeAccountId === 'all' || t.accountId === activeAccountId || t.toAccountId === activeAccountId;
+    const accountMatch = activeAccountId === 'all' || t.accountId === activeAccountId;
     return dateMatch && accountMatch;
   });
 
