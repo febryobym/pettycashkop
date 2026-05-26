@@ -1,4 +1,10 @@
-export type TransactionType = 'income' | 'expense';
+export type TransactionType = 'income' | 'expense' | 'transfer';
+
+export interface Account {
+  id: string;
+  name: string;
+  description?: string;
+}
 
 export interface Category {
   id: string;
@@ -13,6 +19,8 @@ export interface Transaction {
   amount: number;
   type: TransactionType;
   categoryId: string;
+  accountId: string;
+  toAccountId?: string; // Only for 'transfer' type
   qty?: number;
   unit?: string;
   price?: number;

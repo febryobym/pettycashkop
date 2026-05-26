@@ -13,13 +13,15 @@ import {
   Trash2,
   Calendar,
   X,
-  Edit
+  Edit,
+  ArrowRightLeft,
+  Briefcase
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, isWithinInterval, parseISO } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { cn, formatCurrency } from './lib/utils';
-import { Transaction, Category, TransactionType, MonthlySummary } from './types';
+import { Transaction, Category, TransactionType, MonthlySummary, Account } from './types';
 import {
   BarChart,
   Bar,
@@ -45,9 +47,16 @@ const DEFAULT_CATEGORIES: Category[] = [
   { id: '8', name: 'Operasional', color: '#06b6d4' },
 ];
 
+const DEFAULT_ACCOUNTS: Account[] = [
+  { id: 'acc_1', name: 'Petty Cash Utama', description: 'Kas operasional harian' },
+  { id: 'acc_2', name: 'Kas Cadangan', description: 'Dana darurat & simpanan' },
+];
+
 export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
+  const [accounts, setAccounts] = useState<Account[]>(DEFAULT_ACCOUNTS);
+  const [activeAccountId, setActiveAccountId] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'categories' | 'reports'>('dashboard');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -58,8 +67,10 @@ export default function App() {
   useEffect(() => {
     const savedTransactions = localStorage.getItem('pettycash_transactions');
     const savedCategories = localStorage.getItem('pettycash_categories');
+    const savedAccounts = localStorage.getItem('pettycash_accounts');
     if (savedTransactions) setTransactions(JSON.parse(savedTransactions));
     if (savedCategories) setCategories(JSON.parse(savedCategories));
+    if (savedAccounts) setAccounts(JSON.parse(savedAccounts));
   }, []);
 
   useEffect(() => {
@@ -70,10 +81,26 @@ export default function App() {
     localStorage.setItem('pettycash_categories', JSON.stringify(categories));
   }, [categories]);
 
+  useEffect(() => {
+    localStorage.setItem('pettycash_accounts', JSON.stringify(accounts));
+  }, [accounts]);
+
   // Calculations
-  const totalBalance = transactions.reduce((acc, t) => 
-    t.type === 'income' ? acc + t.amount : acc - t.amount, 0
-  );
+  const getAccountBalance = (accId: string) => {
+    return transactions.reduce((acc, t) => {
+      if (t.accountId === accId) {
+        if (t.type === 'income') return acc + t.amount;
+        if (t.type === 'expense') return acc - t.amount;
+        if (t.type === 'transfer') return acc - t.amount; // Transfer FROM
+      }
+      if (t.type === 'transfer' && t.toAccountId === accId) {
+        return acc + t.amount; // Transfer TO
+      }
+      return acc;
+    }, 0);
+  };
+
+  const totalBalance = accounts.reduce((acc, a) => acc + getAccountBalance(a.id), 0);
   
   const years = React.useMemo(() => {
     const yearsSet = new Set<number>([new Date().getFullYear()]);
@@ -83,11 +110,27 @@ export default function App() {
 
   const filteredTransactions = transactions.filter(t => {
     const date = parseISO(t.date);
-    return date.getMonth() === filterMonth && date.getFullYear() === filterYear;
+    const dateMatch = date.getMonth() === filterMonth && date.getFullYear() === filterYear;
+    const accountMatch = activeAccountId === 'all' || t.accountId === activeAccountId || t.toAccountId === activeAccountId;
+    return dateMatch && accountMatch;
   });
 
-  const monthIncome = filteredTransactions.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
-  const monthExpense = filteredTransactions.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
+  const monthIncome = filteredTransactions.reduce((acc, t) => {
+    if (t.type === 'income') {
+      if (activeAccountId === 'all' || t.accountId === activeAccountId) return acc + t.amount;
+    }
+    if (t.type === 'transfer' && t.toAccountId === activeAccountId) return acc + t.amount;
+    return acc;
+  }, 0);
+
+  const monthExpense = filteredTransactions.reduce((acc, t) => {
+    if (t.type === 'expense') {
+      if (activeAccountId === 'all' || t.accountId === activeAccountId) return acc + t.amount;
+    }
+    if (t.type === 'transfer' && t.accountId === activeAccountId) return acc + t.amount;
+    return acc;
+  }, 0);
+
   const monthTransactionsCount = filteredTransactions.length;
 
   // Excel Export
@@ -196,9 +239,38 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 overflow-auto">
         <header className="h-16 bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-10 shrink-0">
-          <h1 className="text-lg font-bold text-slate-800 tracking-tight">
-            {activeTab === 'dashboard' ? "Dashboard Petty Cash" : activeTab}
-          </h1>
+          <div className="flex items-center gap-6">
+            <h1 className="text-lg font-bold text-slate-800 tracking-tight">
+              {activeTab === 'dashboard' ? "Dashboard Petty Cash" : activeTab}
+            </h1>
+            
+            {activeTab === 'dashboard' && (
+              <div className="flex bg-slate-100 p-1 rounded-lg">
+                <button 
+                  onClick={() => setActiveAccountId('all')}
+                  className={cn(
+                    "px-3 py-1 text-xs font-bold rounded-md transition-all",
+                    activeAccountId === 'all' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  )}
+                >
+                  Semua
+                </button>
+                {accounts.map(acc => (
+                  <button 
+                    key={acc.id}
+                    onClick={() => setActiveAccountId(acc.id)}
+                    className={cn(
+                      "px-3 py-1 text-xs font-bold rounded-md transition-all ml-1",
+                      activeAccountId === acc.id ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                    )}
+                  >
+                    {acc.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center gap-3">
             {activeTab === 'dashboard' && (
               <div className="flex items-center gap-2 mr-4 bg-slate-50 p-1 rounded-lg border border-slate-200">
@@ -291,6 +363,7 @@ export default function App() {
                             key={t.id} 
                             transaction={t} 
                             category={categories.find(c => c.id === t.categoryId)} 
+                            accounts={accounts}
                             onDelete={deleteTransaction}
                             onEdit={(t) => {
                               setEditingTransaction(t);
@@ -314,14 +387,27 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="bg-indigo-50 p-5 rounded-xl border border-indigo-100">
-                    <h3 className="font-bold text-indigo-900 mb-2">Butuh Bantuan?</h3>
-                    <p className="text-xs text-indigo-700 leading-relaxed">
-                      Laporan Anda dikalkulasi otomatis setiap ada transaksi baru. Pastikan kategori sudah sesuai agar grafik akurat.
-                    </p>
-                    <button className="mt-4 w-full py-2 bg-white text-indigo-700 text-sm font-bold rounded-lg border border-indigo-200 hover:bg-indigo-50 transition-colors">
-                      Panduan Pengguna
-                    </button>
+                  <div className="flex flex-col gap-4">
+                    <h3 className="font-bold text-slate-800 text-sm">Saldo Account</h3>
+                    {accounts.map(acc => (
+                      <div key={acc.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between group hover:border-indigo-200 transition-colors">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center text-slate-400 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
+                            <Wallet className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-500 uppercase tracking-tight">{acc.name}</p>
+                            <p className="text-sm font-bold text-slate-900">{formatCurrency(getAccountBalance(acc.id))}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    <div className="bg-indigo-900 rounded-2xl p-6 text-white shadow-xl shadow-indigo-100 relative overflow-hidden mt-2">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 blur-2xl" />
+                      <p className="text-xs text-indigo-300 uppercase tracking-widest font-bold mb-1 z-10 relative">Total Keseluruhan</p>
+                      <p className="text-3xl font-bold z-10 relative italic">{formatCurrency(totalBalance)}</p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -349,6 +435,7 @@ export default function App() {
                       key={t.id} 
                       transaction={t} 
                       category={categories.find(c => c.id === t.categoryId)}
+                      accounts={accounts}
                       onDelete={deleteTransaction}
                       onEdit={(t) => {
                         setEditingTransaction(t);
@@ -385,6 +472,7 @@ export default function App() {
         {isFormOpen && (
           <TransactionModal 
             categories={categories} 
+            accounts={accounts}
             initialData={editingTransaction || undefined}
             onClose={() => {
               setIsFormOpen(false);
@@ -442,11 +530,23 @@ function StatCard({ label, value, icon, color, isCount }: { label: string, value
   );
 }
 
-function TransactionRow({ transaction, category, onDelete, onEdit, showActions }: { transaction: Transaction, category?: Category, onDelete: (id: string) => void, onEdit?: (t: Transaction) => void, showActions?: boolean, key?: string }) {
+function TransactionRow({ transaction, category, accounts, onDelete, onEdit, showActions }: { transaction: Transaction, category?: Category, accounts: Account[], onDelete: (id: string) => void, onEdit?: (t: Transaction) => void, showActions?: boolean }) {
+  const fromAcc = accounts.find(a => a.id === transaction.accountId);
+  const toAcc = accounts.find(a => a.id === transaction.toAccountId);
+
   return (
     <tr className="hover:bg-slate-50/50 transition-colors group">
       <td className="px-4 py-3 whitespace-nowrap text-slate-600 font-medium">{format(parseISO(transaction.date), 'dd MMM yyyy')}</td>
-      <td className="px-4 py-3 font-semibold text-slate-800">{transaction.description}</td>
+      <td className="px-4 py-3">
+        <div className="flex flex-col">
+          <span className="font-semibold text-slate-800">{transaction.description}</span>
+          {transaction.type === 'transfer' && (
+            <span className="text-[10px] text-slate-400 font-medium uppercase tracking-tighter">
+              Transfer: {fromAcc?.name} → {toAcc?.name}
+            </span>
+          )}
+        </div>
+      </td>
       <td className="px-4 py-3">
         <span 
           className="px-2 py-0.5 rounded-full text-xs font-bold"
@@ -457,9 +557,11 @@ function TransactionRow({ transaction, category, onDelete, onEdit, showActions }
       </td>
       <td className={cn(
         "px-4 py-3 text-right font-bold",
-        transaction.type === 'income' ? "text-emerald-600" : "text-rose-600"
+        transaction.type === 'income' ? "text-emerald-600" : 
+        transaction.type === 'expense' ? "text-rose-600" :
+        "text-indigo-600"
       )}>
-        {transaction.type === 'income' ? '+' : '-'} {formatCurrency(transaction.amount)}
+        {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : '⇄'} {formatCurrency(transaction.amount)}
       </td>
       {showActions && (
         <td className="px-4 py-3 text-right">
@@ -599,7 +701,7 @@ function CategoryManager({ categories, onAdd, onDelete }: { categories: Category
   );
 }
 
-function TransactionModal({ categories, onClose, onSubmit, initialData }: { categories: Category[], onClose: () => void, onSubmit: (t: Omit<Transaction, 'id'>) => void, initialData?: Transaction }) {
+function TransactionModal({ categories, accounts, onClose, onSubmit, initialData }: { categories: Category[], accounts: Account[], onClose: () => void, onSubmit: (t: Omit<Transaction, 'id'>) => void, initialData?: Transaction }) {
   const [formData, setFormData] = useState({
     date: initialData?.date || format(new Date(), 'yyyy-MM-dd'),
     description: initialData?.description || '',
@@ -608,7 +710,9 @@ function TransactionModal({ categories, onClose, onSubmit, initialData }: { cate
     unit: initialData?.unit || '',
     price: initialData?.price?.toString() || '',
     type: initialData?.type || 'expense' as TransactionType,
-    categoryId: initialData?.categoryId || categories[0]?.id || ''
+    categoryId: initialData?.categoryId || categories[0]?.id || '',
+    accountId: initialData?.accountId || accounts[0]?.id || '',
+    toAccountId: initialData?.toAccountId || accounts[1]?.id || ''
   });
 
   // Auto-calculate Total Amount when Qty or Price changes
@@ -677,31 +781,71 @@ function TransactionModal({ categories, onClose, onSubmit, initialData }: { cate
             >
               Pemasukan
             </button>
+            <button 
+              type="button"
+              onClick={() => setFormData({...formData, type: 'transfer'})}
+              className={cn(
+                "flex-1 py-2 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-1",
+                formData.type === 'transfer' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              Transfer
+            </button>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tanggal</label>
-              <input 
-                type="date" 
-                required
-                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-100 outline-none"
-                value={formData.date}
-                onChange={e => setFormData({...formData, date: e.target.value})}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Kategori</label>
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                {formData.type === 'transfer' ? 'Dari Akun' : 'Akun'}
+              </label>
               <select 
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-100 outline-none appearance-none bg-white"
-                value={formData.categoryId}
-                onChange={e => setFormData({...formData, categoryId: e.target.value})}
+                value={formData.accountId}
+                onChange={e => setFormData({...formData, accountId: e.target.value})}
               >
-                {categories.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                {accounts.map(a => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
               </select>
             </div>
+            {formData.type === 'transfer' ? (
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ke Akun</label>
+                <select 
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-100 outline-none appearance-none bg-white"
+                  value={formData.toAccountId}
+                  onChange={e => setFormData({...formData, toAccountId: e.target.value})}
+                >
+                  {accounts.filter(a => a.id !== formData.accountId).map(a => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Kategori</label>
+                <select 
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-100 outline-none appearance-none bg-white"
+                  value={formData.categoryId}
+                  onChange={e => setFormData({...formData, categoryId: e.target.value})}
+                >
+                  {categories.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tanggal</label>
+            <input 
+              type="date" 
+              required
+              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-100 outline-none"
+              value={formData.date}
+              onChange={e => setFormData({...formData, date: e.target.value})}
+            />
           </div>
 
           <div className="space-y-1.5">
