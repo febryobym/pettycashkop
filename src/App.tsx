@@ -29,7 +29,9 @@ import {
   Tooltip,
   ResponsiveContainer,
   Legend,
-  Cell
+  Cell,
+  PieChart,
+  Pie
 } from 'recharts';
 
 const DEFAULT_CATEGORIES: Category[] = [
@@ -499,31 +501,52 @@ function ExpenseChart({ transactions, categories }: { transactions: Transaction[
     return { name: cat.name, value: total, color: cat.color };
   }).filter(d => d.value > 0);
 
+  if (expenseData.length === 0) {
+    return (
+      <div className="h-full flex items-center justify-center text-slate-400 text-xs italic">
+        Belum ada data pengeluaran
+      </div>
+    );
+  }
+
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={expenseData} layout="vertical" margin={{ left: 20, right: 30, top: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f3f4f6" />
-        <XAxis type="number" hide />
-        <YAxis 
-          dataKey="name" 
-          type="category" 
-          width={120} 
-          axisLine={false} 
-          tickLine={false} 
-          fontSize={12} 
-          fontWeight={500} 
-        />
-        <Tooltip 
-          cursor={{ fill: '#f9fafb' }}
-          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-          formatter={(value: number) => [formatCurrency(value), 'Jumlah']}
-        />
-        <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+      <PieChart>
+        <Pie
+          data={expenseData}
+          cx="50%"
+          cy="45%"
+          innerRadius={60}
+          outerRadius={85}
+          paddingAngle={5}
+          dataKey="value"
+        >
           {expenseData.map((entry, index) => (
-            <Cell key={`cell-${index}`} fill={entry.color} />
+            <Cell key={`cell-${index}`} fill={entry.color} strokeWidth={0} />
           ))}
-        </Bar>
-      </BarChart>
+        </Pie>
+        <Tooltip 
+          contentStyle={{ 
+            borderRadius: '12px', 
+            border: 'none', 
+            boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', 
+            fontSize: '12px',
+            fontWeight: '600'
+          }}
+          formatter={(value: number) => [formatCurrency(value), '']}
+        />
+        <Legend 
+          layout="horizontal" 
+          verticalAlign="bottom" 
+          align="center"
+          iconType="circle"
+          wrapperStyle={{ 
+            fontSize: '11px', 
+            paddingTop: '20px',
+            fontWeight: '500'
+          }}
+        />
+      </PieChart>
     </ResponsiveContainer>
   );
 }
