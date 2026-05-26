@@ -455,7 +455,7 @@ export default function App() {
                 <div className="lg:col-span-4 flex flex-col gap-6">
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                     <h3 className="font-bold text-slate-800 mb-4 text-sm">Alokasi Kategori</h3>
-                    <div className="h-72">
+                    <div className="h-64">
                       <ExpenseChart transactions={filteredTransactions} categories={categories} />
                     </div>
                   </div>
@@ -753,9 +753,9 @@ function ExpenseChart({ transactions, categories }: { transactions: Transaction[
         <Pie
           data={expenseData}
           cx="50%"
-          cy="50%"
+          cy="45%"
           innerRadius={30}
-          outerRadius={85}
+          outerRadius={95}
           paddingAngle={3}
           dataKey="value"
           labelLine={false}
