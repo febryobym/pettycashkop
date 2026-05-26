@@ -12,7 +12,8 @@ import {
   Settings,
   Trash2,
   Calendar,
-  X
+  X,
+  Edit
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, isWithinInterval, parseISO } from 'date-fns';
@@ -47,6 +48,7 @@ export default function App() {
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'categories' | 'reports'>('dashboard');
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth());
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   
@@ -106,6 +108,12 @@ export default function App() {
     const newTransaction = { ...t, id: crypto.randomUUID() };
     setTransactions([newTransaction, ...transactions]);
     setIsFormOpen(false);
+  };
+
+  const updateTransaction = (id: string, updatedT: Omit<Transaction, 'id'>) => {
+    setTransactions(transactions.map(t => t.id === id ? { ...updatedT, id } : t));
+    setIsFormOpen(false);
+    setEditingTransaction(null);
   };
 
   const deleteTransaction = (id: string) => {
@@ -210,7 +218,10 @@ export default function App() {
               </div>
             )}
             <button 
-              onClick={() => setIsFormOpen(true)}
+              onClick={() => {
+                setEditingTransaction(null);
+                setIsFormOpen(true);
+              }}
               className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
             >
               <Plus className="w-4 h-4" />
@@ -276,6 +287,10 @@ export default function App() {
                             transaction={t} 
                             category={categories.find(c => c.id === t.categoryId)} 
                             onDelete={deleteTransaction}
+                            onEdit={(t) => {
+                              setEditingTransaction(t);
+                              setIsFormOpen(true);
+                            }}
                           />
                         ))}
                       </tbody>
@@ -330,7 +345,11 @@ export default function App() {
                       transaction={t} 
                       category={categories.find(c => c.id === t.categoryId)}
                       onDelete={deleteTransaction}
-                      showDelete
+                      onEdit={(t) => {
+                        setEditingTransaction(t);
+                        setIsFormOpen(true);
+                      }}
+                      showActions
                     />
                   ))}
                 </tbody>
@@ -361,8 +380,12 @@ export default function App() {
         {isFormOpen && (
           <TransactionModal 
             categories={categories} 
-            onClose={() => setIsFormOpen(false)} 
-            onSubmit={addTransaction}
+            initialData={editingTransaction || undefined}
+            onClose={() => {
+              setIsFormOpen(false);
+              setEditingTransaction(null);
+            }} 
+            onSubmit={editingTransaction ? (t) => updateTransaction(editingTransaction.id, t) : addTransaction}
           />
         )}
       </AnimatePresence>
@@ -414,7 +437,7 @@ function StatCard({ label, value, icon, color, isCount }: { label: string, value
   );
 }
 
-function TransactionRow({ transaction, category, onDelete, showDelete }: { transaction: Transaction, category?: Category, onDelete: (id: string) => void, showDelete?: boolean, key?: string }) {
+function TransactionRow({ transaction, category, onDelete, onEdit, showActions }: { transaction: Transaction, category?: Category, onDelete: (id: string) => void, onEdit?: (t: Transaction) => void, showActions?: boolean, key?: string }) {
   return (
     <tr className="hover:bg-slate-50/50 transition-colors group">
       <td className="px-4 py-3 whitespace-nowrap text-slate-600 font-medium">{format(parseISO(transaction.date), 'dd MMM yyyy')}</td>
@@ -433,13 +456,31 @@ function TransactionRow({ transaction, category, onDelete, showDelete }: { trans
       )}>
         {transaction.type === 'income' ? '+' : '-'} {formatCurrency(transaction.amount)}
       </td>
-      {showDelete && (
+      {showActions && (
+        <td className="px-4 py-3 text-right">
+          <div className="flex items-center justify-end gap-2">
+            <button 
+              onClick={() => onEdit?.(transaction)}
+              className="p-1.5 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+            >
+              <Edit className="w-4 h-4" />
+            </button>
+            <button 
+              onClick={() => onDelete(transaction.id)}
+              className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        </td>
+      )}
+      {!showActions && (
         <td className="px-4 py-3 text-right">
           <button 
-            onClick={() => onDelete(transaction.id)}
-            className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+            onClick={() => onEdit?.(transaction)}
+            className="p-1.5 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
           >
-            <Trash2 className="w-4 h-4" />
+            <Edit className="w-4 h-4" />
           </button>
         </td>
       )}
@@ -532,13 +573,13 @@ function CategoryManager({ categories, onAdd, onDelete }: { categories: Category
   );
 }
 
-function TransactionModal({ categories, onClose, onSubmit }: { categories: Category[], onClose: () => void, onSubmit: (t: Omit<Transaction, 'id'>) => void }) {
+function TransactionModal({ categories, onClose, onSubmit, initialData }: { categories: Category[], onClose: () => void, onSubmit: (t: Omit<Transaction, 'id'>) => void, initialData?: Transaction }) {
   const [formData, setFormData] = useState({
-    date: format(new Date(), 'yyyy-MM-dd'),
-    description: '',
-    amount: '',
-    type: 'expense' as TransactionType,
-    categoryId: categories[0]?.id || ''
+    date: initialData?.date || format(new Date(), 'yyyy-MM-dd'),
+    description: initialData?.description || '',
+    amount: initialData?.amount.toString() || '',
+    type: initialData?.type || 'expense' as TransactionType,
+    categoryId: initialData?.categoryId || categories[0]?.id || ''
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -566,7 +607,7 @@ function TransactionModal({ categories, onClose, onSubmit }: { categories: Categ
         className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden"
       >
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-          <h3 className="text-xl font-bold">Catat Transaksi</h3>
+          <h3 className="text-xl font-bold">{initialData ? 'Ubah Transaksi' : 'Catat Transaksi'}</h3>
           <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-full transition-colors">
             <X className="w-5 h-5" />
           </button>
@@ -645,7 +686,7 @@ function TransactionModal({ categories, onClose, onSubmit }: { categories: Categ
           </div>
 
           <button className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold mt-4 hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 active:scale-95 leading-none">
-            Simpan Transaksi
+            {initialData ? 'Simpan Perubahan' : 'Simpan Transaksi'}
           </button>
         </form>
       </motion.div>
