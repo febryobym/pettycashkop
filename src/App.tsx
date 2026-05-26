@@ -1039,27 +1039,6 @@ function TransactionModal({ categories, accounts, onClose, onSubmit, initialData
 }
 
 function ReportsView({ transactions, categories }: { transactions: Transaction[], categories: Category[] }) {
-  const [insights, setInsights] = useState<string | null>(null);
-  const [isLoadingInsights, setIsLoadingInsights] = useState(false);
-
-  // AI Insights call
-  const generateInsights = async () => {
-    setIsLoadingInsights(true);
-    try {
-      const response = await fetch('/api/insights', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transactions, categories })
-      });
-      const data = await response.json();
-      setInsights(data.insights);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsLoadingInsights(false);
-    }
-  };
-
   // Group by month
   const monthlyData = React.useMemo(() => {
     const summary: Record<string, { income: number, expense: number }> = {};
@@ -1081,61 +1060,114 @@ function ReportsView({ transactions, categories }: { transactions: Transaction[]
       .sort((a, b) => b.month.localeCompare(a.month));
   }, [transactions]);
 
+  // Group by category for expenses
+  const expenseByCategoryData = React.useMemo(() => {
+    const sumSummary: Record<string, number> = {};
+    
+    transactions.forEach(t => {
+      if (t.type === 'expense') {
+        const category = categories.find(c => c.id === t.categoryId);
+        const catName = category ? category.name : 'Lain-lain';
+        sumSummary[catName] = (sumSummary[catName] || 0) + t.amount;
+      }
+    });
+
+    return Object.entries(sumSummary)
+      .map(([name, value]) => {
+        const category = categories.find(c => c.name === name);
+        return {
+          name,
+          value,
+          color: category ? category.color : '#6b7280'
+        };
+      })
+      .sort((a, b) => b.value - a.value);
+  }, [transactions, categories]);
+
+  const totalExpense = React.useMemo(() => {
+    return expenseByCategoryData.reduce((acc, curr) => acc + curr.value, 0);
+  }, [expenseByCategoryData]);
+
   return (
     <div className="space-y-8">
-      {/* AI Insights Card */}
-      <div className="bg-gradient-to-br from-indigo-900 via-indigo-800 to-slate-900 p-8 rounded-2xl text-white shadow-xl shadow-slate-200 flex flex-col md:flex-row items-center gap-8 border border-white/5 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-32 -mt-32 blur-3xl pointer-events-none" />
-        <div className="bg-white/10 p-5 rounded-2xl backdrop-blur-xl border border-white/10 z-10">
-          <BarChart3 className="w-10 h-10 text-white" />
-        </div>
-        <div className="flex-1 text-center md:text-left z-10">
-          <h3 className="text-2xl font-bold mb-2 tracking-tight">AI Financial Insights</h3>
-          <p className="text-indigo-200 mb-6 max-w-lg leading-relaxed">Gunakan kekuatan AI untuk menganalisis pola pengeluaran Anda dan dapatkan saran cerdas untuk menghemat lebih banyak.</p>
-          <button 
-            onClick={generateInsights}
-            disabled={isLoadingInsights || transactions.length === 0}
-            className="bg-white text-indigo-900 px-8 py-3 rounded-xl font-bold hover:bg-indigo-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg active:scale-95 text-sm"
-          >
-            {isLoadingInsights ? 'Menganalisis...' : 'Dapatkan Insight Sekarang'}
-          </button>
-        </div>
-      </div>
-
-      {insights && (
-        <motion.div 
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white p-6 rounded-2xl border-l-4 border-l-indigo-600 shadow-sm border border-slate-200"
-        >
-          <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-indigo-600" />
-            Rekomendasi AI Untuk Anda
-          </h4>
-          <div className="text-slate-600 leading-relaxed whitespace-pre-line text-sm">
-            {insights}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Analisis Bulanan */}
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+          <div>
+            <h3 className="text-lg font-bold mb-6 text-slate-800">Analisis Bulanan</h3>
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={monthlyData.slice(0, 6).reverse()}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="month" axisLine={false} tickLine={false} fontSize={12} tick={{ fill: '#64748b' }} dy={10} />
+                  <YAxis axisLine={false} tickLine={false} fontSize={12} tick={{ fill: '#64748b' }} tickFormatter={(v) => `${v/1000}k`} />
+                  <Tooltip 
+                    cursor={{ fill: '#f8fafc' }}
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', padding: '12px' }}
+                    formatter={(v: number) => formatCurrency(v)}
+                  />
+                  <Legend verticalAlign="top" align="right" iconType="circle" />
+                  <Bar dataKey="income" name="Pemasukan" fill="#059669" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="expense" name="Pengeluaran" fill="#e11d48" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
-        </motion.div>
-      )}
+        </div>
 
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-        <h3 className="text-lg font-bold mb-6 text-slate-800">Analisis Bulanan</h3>
-        <div className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={monthlyData.slice(0, 6).reverse()}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-              <XAxis dataKey="month" axisLine={false} tickLine={false} fontSize={12} tick={{ fill: '#64748b' }} dy={10} />
-              <YAxis axisLine={false} tickLine={false} fontSize={12} tick={{ fill: '#64748b' }} tickFormatter={(v) => `${v/1000}k`} />
-              <Tooltip 
-                cursor={{ fill: '#f8fafc' }}
-                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', padding: '12px' }}
-                formatter={(v: number) => formatCurrency(v)}
-              />
-              <Legend verticalAlign="top" align="right" iconType="circle" />
-              <Bar dataKey="income" name="Pemasukan" fill="#059669" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="expense" name="Pengeluaran" fill="#e11d48" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+        {/* Pengeluaran Per Kategori */}
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
+          <div>
+            <h3 className="text-lg font-bold mb-6 text-slate-800">Pengeluaran Per Kategori</h3>
+            {expenseByCategoryData.length === 0 ? (
+              <div className="h-80 flex flex-col items-center justify-center text-slate-400">
+                <Tag className="w-12 h-12 mb-2 stroke-1" />
+                <p className="text-sm font-medium">Tidak ada data pengeluaran</p>
+              </div>
+            ) : (
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-6 h-80">
+                <div className="w-full sm:w-1/2 h-full min-h-[180px] flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={expenseByCategoryData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={4}
+                        dataKey="value"
+                      >
+                        {expenseByCategoryData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', padding: '12px' }}
+                        formatter={(v: number) => [formatCurrency(v), 'Pengeluaran']}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="w-full sm:w-1/2 space-y-2 overflow-y-auto max-h-[240px] pr-2 scrollbar-thin">
+                  {expenseByCategoryData.map((item) => {
+                    const percentage = totalExpense > 0 ? ((item.value / totalExpense) * 100).toFixed(1) : '0';
+                    return (
+                      <div key={item.name} className="flex items-center justify-between text-xs font-medium">
+                        <div className="flex items-center gap-2 truncate">
+                          <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                          <span className="text-slate-600 truncate">{item.name}</span>
+                        </div>
+                        <div className="text-right font-semibold text-slate-900 shrink-0 ml-2">
+                          {formatCurrency(item.value)} <span className="text-slate-400 font-normal ml-1">({percentage}%)</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
