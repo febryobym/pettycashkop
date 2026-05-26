@@ -202,7 +202,7 @@ export default function App() {
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
               <BarChart3 className="w-5 h-5 text-white" />
             </div>
-            <span className="font-bold text-xl tracking-tight text-indigo-900">PettyCash+</span>
+            <span className="font-bold text-xl tracking-tight text-indigo-900">Petty Cash Koperasi</span>
           </div>
         </div>
 
@@ -234,10 +234,6 @@ export default function App() {
         </nav>
 
         <div className="p-4 border-t border-slate-200 mt-auto">
-          <div className="bg-indigo-900 rounded-xl p-4 text-white mb-4">
-            <p className="text-xs text-indigo-300 uppercase tracking-wider font-semibold mb-1">Saldo Saat Ini</p>
-            <p className="text-xl font-bold italic">{formatCurrency(totalBalance)}</p>
-          </div>
           <button 
             onClick={exportToExcel}
             className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium shadow-sm hover:bg-emerald-700 transition-colors"
