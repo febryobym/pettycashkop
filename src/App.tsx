@@ -45,6 +45,7 @@ const DEFAULT_CATEGORIES: Category[] = [
   { id: '6', name: 'ATK', color: '#6366f1' },
   { id: '7', name: 'Belanja Dapur', color: '#f97316' },
   { id: '8', name: 'Operasional', color: '#06b6d4' },
+  { id: 'transfer_cat', name: 'Pemindahan Kas', color: '#6366f1' },
 ];
 
 const DEFAULT_ACCOUNTS: Account[] = [
@@ -69,7 +70,15 @@ export default function App() {
     const savedCategories = localStorage.getItem('pettycash_categories');
     const savedAccounts = localStorage.getItem('pettycash_accounts');
     if (savedTransactions) setTransactions(JSON.parse(savedTransactions));
-    if (savedCategories) setCategories(JSON.parse(savedCategories));
+    if (savedCategories) {
+      const parsed = JSON.parse(savedCategories);
+      if (!parsed.some((c: Category) => c.id === 'transfer_cat')) {
+        parsed.push({ id: 'transfer_cat', name: 'Pemindahan Kas', color: '#6366f1' });
+      }
+      setCategories(parsed);
+    } else {
+      setCategories(DEFAULT_CATEGORIES);
+    }
     if (savedAccounts) {
       const parsed = JSON.parse(savedAccounts);
       const updated = parsed.map((acc: Account) => {
@@ -736,8 +745,10 @@ function TransactionModal({ categories, accounts, onClose, onSubmit, initialData
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.description || !formData.amount) return;
+    const finalCategoryId = formData.type === 'transfer' ? 'transfer_cat' : formData.categoryId;
     onSubmit({
       ...formData,
+      categoryId: finalCategoryId,
       amount: parseFloat(formData.amount),
       qty: parseFloat(formData.qty) || undefined,
       price: parseFloat(formData.price) || undefined,
@@ -953,7 +964,7 @@ function ReportsView({ transactions, categories }: { transactions: Transaction[]
       const monthKey = format(parseISO(t.date), 'yyyy-MM');
       if (!summary[monthKey]) summary[monthKey] = { income: 0, expense: 0 };
       if (t.type === 'income') summary[monthKey].income += t.amount;
-      else summary[monthKey].expense += t.amount;
+      else if (t.type === 'expense') summary[monthKey].expense += t.amount;
     });
 
     return Object.entries(summary)
