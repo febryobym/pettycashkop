@@ -21,8 +21,6 @@ import * as XLSX from 'xlsx';
 import { cn, formatCurrency } from './lib/utils';
 import { Transaction, Category, TransactionType, MonthlySummary } from './types';
 import {
-  PieChart,
-  Pie,
   BarChart,
   Bar,
   XAxis,
@@ -309,7 +307,7 @@ export default function App() {
                 <div className="lg:col-span-4 flex flex-col gap-6">
                   <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                     <h3 className="font-bold text-slate-800 mb-4 text-sm">Alokasi Kategori</h3>
-                    <div className="min-h-[380px]">
+                    <div className="h-64">
                       <ExpenseChart transactions={filteredTransactions} categories={categories} />
                     </div>
                   </div>
@@ -501,48 +499,32 @@ function ExpenseChart({ transactions, categories }: { transactions: Transaction[
     return { name: cat.name, value: total, color: cat.color };
   }).filter(d => d.value > 0);
 
-  const totalExpense = expenseData.reduce((sum, d) => sum + d.value, 0);
-
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 min-h-[140px]">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={expenseData}
-              innerRadius={55}
-              outerRadius={75}
-              paddingAngle={4}
-              dataKey="value"
-              animationBegin={0}
-              animationDuration={800}
-            >
-              {expenseData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
-              ))}
-            </Pie>
-            <Tooltip 
-              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-              formatter={(value: number) => [formatCurrency(value), '']}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="space-y-2 mt-4">
-        {expenseData.map((item, idx) => (
-          <div key={idx} className="flex items-center justify-between group">
-            <div className="flex items-center gap-2">
-              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
-              <span className="text-xs font-semibold text-slate-700 truncate max-w-[120px]">{item.name}</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] text-slate-400 font-bold">{Math.round((item.value / totalExpense) * 100)}%</span>
-              <span className="text-xs font-bold text-slate-800">{formatCurrency(item.value)}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={expenseData} layout="vertical" margin={{ left: 20, right: 30, top: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f3f4f6" />
+        <XAxis type="number" hide />
+        <YAxis 
+          dataKey="name" 
+          type="category" 
+          width={120} 
+          axisLine={false} 
+          tickLine={false} 
+          fontSize={12} 
+          fontWeight={500} 
+        />
+        <Tooltip 
+          cursor={{ fill: '#f9fafb' }}
+          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+          formatter={(value: number) => [formatCurrency(value), 'Jumlah']}
+        />
+        <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+          {expenseData.map((entry, index) => (
+            <Cell key={`cell-${index}`} fill={entry.color} />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
   );
 }
 
