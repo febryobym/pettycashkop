@@ -132,7 +132,10 @@ export default function App() {
   const filteredTransactions = transactions.filter(t => {
     const date = parseISO(t.date);
     const dateMatch = date.getMonth() === filterMonth && date.getFullYear() === filterYear;
-    const accountMatch = activeAccountId === 'all' || t.accountId === activeAccountId;
+    const accountMatch = 
+      activeAccountId === 'all' || 
+      t.accountId === activeAccountId ||
+      (t.type === 'transfer' && t.toAccountId === activeAccountId);
     return dateMatch && accountMatch;
   });
 
@@ -381,6 +384,7 @@ export default function App() {
                             transaction={t} 
                             category={categories.find(c => c.id === t.categoryId)} 
                             accounts={accounts}
+                            activeAccountId={activeAccountId}
                             onDelete={deleteTransaction}
                             onEdit={(t) => {
                               setEditingTransaction(t);
@@ -547,9 +551,52 @@ function StatCard({ label, value, icon, color, isCount }: { label: string, value
   );
 }
 
-function TransactionRow({ transaction, category, accounts, onDelete, onEdit, showActions }: { transaction: Transaction, category?: Category, accounts: Account[], onDelete: (id: string) => void, onEdit?: (t: Transaction) => void, showActions?: boolean, key?: any }) {
+function TransactionRow({ 
+  transaction, 
+  category, 
+  accounts, 
+  activeAccountId = 'all', 
+  onDelete, 
+  onEdit, 
+  showActions 
+}: { 
+  transaction: Transaction, 
+  category?: Category, 
+  accounts: Account[], 
+  activeAccountId?: string, 
+  onDelete: (id: string) => void, 
+  onEdit?: (t: Transaction) => void, 
+  showActions?: boolean, 
+  key?: any 
+}) {
   const fromAcc = accounts.find(a => a.id === transaction.accountId);
   const toAcc = accounts.find(a => a.id === transaction.toAccountId);
+
+  const isTransfer = transaction.type === 'transfer';
+  let amountSign = '';
+  let amountColor = '';
+
+  if (transaction.type === 'income') {
+    amountSign = '+';
+    amountColor = 'text-emerald-600';
+  } else if (transaction.type === 'expense') {
+    amountSign = '-';
+    amountColor = 'text-rose-600';
+  } else if (isTransfer) {
+    if (activeAccountId === 'all') {
+      amountSign = '⇄';
+      amountColor = 'text-indigo-600';
+    } else if (transaction.toAccountId === activeAccountId) {
+      amountSign = '+';
+      amountColor = 'text-emerald-600';
+    } else if (transaction.accountId === activeAccountId) {
+      amountSign = '-';
+      amountColor = 'text-rose-600';
+    } else {
+      amountSign = '⇄';
+      amountColor = 'text-indigo-600';
+    }
+  }
 
   return (
     <tr className="hover:bg-slate-50/50 transition-colors group">
@@ -557,7 +604,7 @@ function TransactionRow({ transaction, category, accounts, onDelete, onEdit, sho
       <td className="px-4 py-3">
         <div className="flex flex-col">
           <span className="font-semibold text-slate-800">{transaction.description}</span>
-          {transaction.type === 'transfer' && (
+          {isTransfer && (
             <span className="text-[10px] text-slate-400 font-medium uppercase tracking-tighter">
               Transfer: {fromAcc?.name} → {toAcc?.name}
             </span>
@@ -572,13 +619,8 @@ function TransactionRow({ transaction, category, accounts, onDelete, onEdit, sho
           {category?.name || 'Lain-lain'}
         </span>
       </td>
-      <td className={cn(
-        "px-4 py-3 text-right font-bold",
-        transaction.type === 'income' ? "text-emerald-600" : 
-        transaction.type === 'expense' ? "text-rose-600" :
-        "text-indigo-600"
-      )}>
-        {transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '-' : '⇄'} {formatCurrency(transaction.amount)}
+      <td className={cn("px-4 py-3 text-right font-bold", amountColor)}>
+        {amountSign} {formatCurrency(transaction.amount)}
       </td>
       {showActions && (
         <td className="px-4 py-3 text-right">
@@ -741,6 +783,16 @@ function TransactionModal({ categories, accounts, onClose, onSubmit, initialData
       setFormData(prev => ({ ...prev, amount: total.toString() }));
     }
   }, [formData.qty, formData.price]);
+
+  // Ensure toAccountId is not matching accountId during a transfer
+  useEffect(() => {
+    if (formData.type === 'transfer' && formData.accountId === formData.toAccountId) {
+      const otherAccount = accounts.find(a => a.id !== formData.accountId);
+      if (otherAccount) {
+        setFormData(prev => ({ ...prev, toAccountId: otherAccount.id }));
+      }
+    }
+  }, [formData.accountId, formData.type, accounts, formData.toAccountId]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
