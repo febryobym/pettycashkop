@@ -109,19 +109,35 @@ export default function App() {
   // Calculations
   const getAccountBalance = (accId: string) => {
     return transactions.reduce((acc, t) => {
-      if (t.accountId === accId) {
+      const isFromCurrent = 
+        t.accountId === accId || 
+        (accId === 'acc_1' && (t.accountId === '1' || !t.accountId)) ||
+        (accId === 'acc_2' && t.accountId === '2');
+
+      const isToCurrent = 
+        t.toAccountId === accId ||
+        (accId === 'acc_1' && t.toAccountId === '1') ||
+        (accId === 'acc_2' && t.toAccountId === '2');
+
+      if (isFromCurrent) {
         if (t.type === 'income') return acc + t.amount;
         if (t.type === 'expense') return acc - t.amount;
         if (t.type === 'transfer') return acc - t.amount; // Transfer FROM
       }
-      if (t.type === 'transfer' && t.toAccountId === accId) {
+      if (t.type === 'transfer' && isToCurrent) {
         return acc + t.amount; // Transfer TO
       }
       return acc;
     }, 0);
   };
 
-  const totalBalance = accounts.reduce((acc, a) => acc + getAccountBalance(a.id), 0);
+  const totalBalance = activeAccountId === 'all'
+    ? transactions.reduce((acc, t) => {
+        if (t.type === 'income') return acc + t.amount;
+        if (t.type === 'expense') return acc - t.amount;
+        return acc;
+      }, 0)
+    : getAccountBalance(activeAccountId);
   
   const years = React.useMemo(() => {
     const yearsSet = new Set<number>([new Date().getFullYear()]);
@@ -137,29 +153,57 @@ export default function App() {
     if (activeAccountId === 'all') {
       accountMatch = true;
     } else {
+      const isFromCurrent = 
+        t.accountId === activeAccountId || 
+        (activeAccountId === 'acc_1' && (t.accountId === '1' || !t.accountId)) ||
+        (activeAccountId === 'acc_2' && t.accountId === '2');
+
+      const isToCurrent = 
+        t.toAccountId === activeAccountId ||
+        (activeAccountId === 'acc_1' && t.toAccountId === '1') ||
+        (activeAccountId === 'acc_2' && t.toAccountId === '2');
+
       // "pemasukkan saja, untuk pengeluaran tidak masuk"
-      // Shows only income of this account, or transfers received (transfers into) this account
       accountMatch = 
-        (t.type === 'income' && t.accountId === activeAccountId) ||
-        (t.type === 'transfer' && t.toAccountId === activeAccountId);
+        (t.type === 'income' && isFromCurrent) ||
+        (t.type === 'transfer' && isToCurrent);
     }
     
     return dateMatch && accountMatch;
   });
 
-  const monthIncome = filteredTransactions.reduce((acc, t) => {
-    if (t.type === 'income') {
-      if (activeAccountId === 'all' || t.accountId === activeAccountId) return acc + t.amount;
-    }
-    if (t.type === 'transfer' && t.toAccountId === activeAccountId) return acc + t.amount;
+  const monthTransactions = transactions.filter(t => {
+    const date = parseISO(t.date);
+    return date.getMonth() === filterMonth && date.getFullYear() === filterYear;
+  });
+
+  const monthIncome = monthTransactions.reduce((acc, t) => {
+    const isFromCurrent = 
+      activeAccountId === 'all' ||
+      t.accountId === activeAccountId || 
+      (activeAccountId === 'acc_1' && (t.accountId === '1' || !t.accountId)) ||
+      (activeAccountId === 'acc_2' && t.accountId === '2');
+
+    const isToCurrent = 
+      activeAccountId === 'all' ||
+      t.toAccountId === activeAccountId ||
+      (activeAccountId === 'acc_1' && t.toAccountId === '1') ||
+      (activeAccountId === 'acc_2' && t.toAccountId === '2');
+
+    if (t.type === 'income' && isFromCurrent) return acc + t.amount;
+    if (t.type === 'transfer' && isToCurrent && activeAccountId !== 'all') return acc + t.amount;
     return acc;
   }, 0);
 
-  const monthExpense = filteredTransactions.reduce((acc, t) => {
-    if (t.type === 'expense') {
-      if (activeAccountId === 'all' || t.accountId === activeAccountId) return acc + t.amount;
-    }
-    if (t.type === 'transfer' && t.accountId === activeAccountId) return acc + t.amount;
+  const monthExpense = monthTransactions.reduce((acc, t) => {
+    const isFromCurrent = 
+      activeAccountId === 'all' ||
+      t.accountId === activeAccountId || 
+      (activeAccountId === 'acc_1' && (t.accountId === '1' || !t.accountId)) ||
+      (activeAccountId === 'acc_2' && t.accountId === '2');
+
+    if (t.type === 'expense' && isFromCurrent) return acc + t.amount;
+    if (t.type === 'transfer' && isFromCurrent && activeAccountId !== 'all') return acc + t.amount;
     return acc;
   }, 0);
 
