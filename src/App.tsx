@@ -132,10 +132,18 @@ export default function App() {
   const filteredTransactions = transactions.filter(t => {
     const date = parseISO(t.date);
     const dateMatch = date.getMonth() === filterMonth && date.getFullYear() === filterYear;
-    const accountMatch = 
-      activeAccountId === 'all' || 
-      t.accountId === activeAccountId ||
-      (t.type === 'transfer' && t.toAccountId === activeAccountId);
+    
+    let accountMatch = false;
+    if (activeAccountId === 'all') {
+      accountMatch = true;
+    } else {
+      // "pemasukkan saja, untuk pengeluaran tidak masuk"
+      // Shows only income of this account, or transfers received (transfers into) this account
+      accountMatch = 
+        (t.type === 'income' && t.accountId === activeAccountId) ||
+        (t.type === 'transfer' && t.toAccountId === activeAccountId);
+    }
+    
     return dateMatch && accountMatch;
   });
 
