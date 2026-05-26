@@ -13,6 +13,9 @@ export interface Transaction {
   amount: number;
   type: TransactionType;
   categoryId: string;
+  qty?: number;
+  unit?: string;
+  price?: number;
 }
 
 export interface MonthlySummary {

@@ -93,9 +93,12 @@ export default function App() {
     const data = transactions.map(t => ({
       Tanggal: t.date,
       Deskripsi: t.description,
+      Qty: t.qty || 0,
+      Satuan: t.unit || '',
+      Harga: t.price || 0,
       Tipe: t.type === 'income' ? 'Pemasukan' : 'Pengeluaran',
       Kategori: categories.find(c => c.id === t.categoryId)?.name || 'N/A',
-      Jumlah: t.amount,
+      Total: t.amount,
     }));
 
     const ws = XLSX.utils.json_to_sheet(data);
@@ -578,9 +581,22 @@ function TransactionModal({ categories, onClose, onSubmit, initialData }: { cate
     date: initialData?.date || format(new Date(), 'yyyy-MM-dd'),
     description: initialData?.description || '',
     amount: initialData?.amount.toString() || '',
+    qty: initialData?.qty?.toString() || '1',
+    unit: initialData?.unit || '',
+    price: initialData?.price?.toString() || '',
     type: initialData?.type || 'expense' as TransactionType,
     categoryId: initialData?.categoryId || categories[0]?.id || ''
   });
+
+  // Auto-calculate Total Amount when Qty or Price changes
+  useEffect(() => {
+    const q = parseFloat(formData.qty) || 0;
+    const p = parseFloat(formData.price) || 0;
+    const total = q * p;
+    if (total > 0) {
+      setFormData(prev => ({ ...prev, amount: total.toString() }));
+    }
+  }, [formData.qty, formData.price]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -588,6 +604,9 @@ function TransactionModal({ categories, onClose, onSubmit, initialData }: { cate
     onSubmit({
       ...formData,
       amount: parseFloat(formData.amount),
+      qty: parseFloat(formData.qty) || undefined,
+      price: parseFloat(formData.price) || undefined,
+      unit: formData.unit || undefined
     });
   };
 
@@ -604,7 +623,7 @@ function TransactionModal({ categories, onClose, onSubmit, initialData }: { cate
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
-        className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden"
+        className="relative bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden"
       >
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
           <h3 className="text-xl font-bold">{initialData ? 'Ubah Transaksi' : 'Catat Transaksi'}</h3>
@@ -613,7 +632,7 @@ function TransactionModal({ categories, onClose, onSubmit, initialData }: { cate
           </button>
         </div>
         
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
           <div className="flex gap-2 p-1 bg-slate-100 rounded-xl mb-4">
             <button 
               type="button"
@@ -637,15 +656,29 @@ function TransactionModal({ categories, onClose, onSubmit, initialData }: { cate
             </button>
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tanggal</label>
-            <input 
-              type="date" 
-              required
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-100 outline-none"
-              value={formData.date}
-              onChange={e => setFormData({...formData, date: e.target.value})}
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Tanggal</label>
+              <input 
+                type="date" 
+                required
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-100 outline-none"
+                value={formData.date}
+                onChange={e => setFormData({...formData, date: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Kategori</label>
+              <select 
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-100 outline-none appearance-none bg-white"
+                value={formData.categoryId}
+                onChange={e => setFormData({...formData, categoryId: e.target.value})}
+              >
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -660,29 +693,50 @@ function TransactionModal({ categories, onClose, onSubmit, initialData }: { cate
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Jumlah (Rp)</label>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Qty</label>
+              <input 
+                type="number" 
+                placeholder="1"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-100 outline-none"
+                value={formData.qty}
+                onChange={e => setFormData({...formData, qty: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Satuan</label>
+              <input 
+                type="text" 
+                placeholder="Pcs/Lbr"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-100 outline-none"
+                value={formData.unit}
+                onChange={e => setFormData({...formData, unit: e.target.value})}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Harga (Rp)</label>
+              <input 
+                type="number" 
+                placeholder="0"
+                className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-100 outline-none"
+                value={formData.price}
+                onChange={e => setFormData({...formData, price: e.target.value})}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5 p-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Jumlah (Rp)</label>
             <input 
               type="number" 
               required
+              readOnly
               placeholder="0"
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-100 outline-none font-bold text-lg"
+              className="w-full px-4 py-2 bg-transparent outline-none font-bold text-xl text-slate-900 cursor-default"
               value={formData.amount}
-              onChange={e => setFormData({...formData, amount: e.target.value})}
             />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Kategori</label>
-            <select 
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-100 outline-none appearance-none bg-white"
-              value={formData.categoryId}
-              onChange={e => setFormData({...formData, categoryId: e.target.value})}
-            >
-              {categories.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+            <p className="text-[10px] text-slate-400 italic font-medium">* Otomatis: Qty × Harga</p>
           </div>
 
           <button className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold mt-4 hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 active:scale-95 leading-none">
