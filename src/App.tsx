@@ -48,8 +48,8 @@ const DEFAULT_CATEGORIES: Category[] = [
 ];
 
 const DEFAULT_ACCOUNTS: Account[] = [
-  { id: 'acc_1', name: 'Petty Cash Utama', description: 'Kas operasional harian' },
-  { id: 'acc_2', name: 'Kas Cadangan', description: 'Dana darurat & simpanan' },
+  { id: 'acc_1', name: 'Petty Cash Koperasi', description: 'Kas operasional harian' },
+  { id: 'acc_2', name: 'Transfer dari Mas Aris', description: 'Dana masuk dari Mas Aris' },
 ];
 
 export default function App() {
@@ -70,7 +70,19 @@ export default function App() {
     const savedAccounts = localStorage.getItem('pettycash_accounts');
     if (savedTransactions) setTransactions(JSON.parse(savedTransactions));
     if (savedCategories) setCategories(JSON.parse(savedCategories));
-    if (savedAccounts) setAccounts(JSON.parse(savedAccounts));
+    if (savedAccounts) {
+      const parsed = JSON.parse(savedAccounts);
+      const updated = parsed.map((acc: Account) => {
+        if (acc.id === 'acc_1' && (acc.name === 'Petty Cash Utama' || acc.name === 'Pettycash +' || acc.name === 'Petty Cash +')) {
+          return { ...acc, name: 'Petty Cash Koperasi' };
+        }
+        if (acc.id === 'acc_2' && acc.name === 'Kas Cadangan') {
+          return { ...acc, name: 'Transfer dari Mas Aris', description: 'Dana masuk dari Mas Aris' };
+        }
+        return acc;
+      });
+      setAccounts(updated);
+    }
   }, []);
 
   useEffect(() => {
