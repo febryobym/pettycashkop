@@ -434,7 +434,7 @@ export default function App() {
                     
                     <div className="bg-indigo-900 rounded-2xl p-6 text-white shadow-xl shadow-indigo-100 relative overflow-hidden mt-2">
                       <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 blur-2xl" />
-                      <p className="text-xs text-indigo-300 uppercase tracking-widest font-bold mb-1 z-10 relative">Total Keseluruhan</p>
+                      <p className="text-xs text-indigo-300 uppercase tracking-widest font-bold mb-1 z-10 relative">Saldo Saat Ini</p>
                       <p className="text-3xl font-bold z-10 relative italic">{formatCurrency(totalBalance)}</p>
                     </div>
                   </div>
