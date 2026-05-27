@@ -394,10 +394,12 @@ export default function App() {
         (activeAccountId === 'acc_1' && t.toAccountId === '1') ||
         (activeAccountId === 'acc_2' && t.toAccountId === '2');
 
-      // "pemasukkan saja, untuk pengeluaran tidak masuk"
+      // Menampilkan pemasukan, pengeluaran, transfer masuk, dan transfer keluar dari akun terpilih
       accountMatch = 
         (t.type === 'income' && isFromCurrent) ||
-        (t.type === 'transfer' && isToCurrent);
+        (t.type === 'expense' && isFromCurrent) ||
+        (t.type === 'transfer' && isToCurrent) ||
+        (t.type === 'transfer' && isFromCurrent);
     }
     
     return dateMatch && accountMatch;
