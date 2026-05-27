@@ -23,6 +23,9 @@ import { format, startOfMonth, endOfMonth, eachMonthOfInterval, isWithinInterval
 import * as XLSX from 'xlsx';
 import { cn, formatCurrency } from './lib/utils';
 import { Transaction, Category, TransactionType, MonthlySummary, Account } from './types';
+import { db, auth, handleFirestoreError, OperationType } from './firebase';
+import { onSnapshot, collection, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
 import {
   BarChart,
   Bar,
@@ -36,6 +39,28 @@ import {
   PieChart,
   Pie
 } from 'recharts';
+
+const GarudaLogo = ({ className = "w-12 h-12" }: { className?: string }) => {
+  return (
+    <svg 
+      className={className} 
+      viewBox="0 0 100 100" 
+      fill="none" 
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      {/* Left Wing (Red) */}
+      <path d="M50,40 L15,15 L25.5,37 L15,42.5 L30,53 L20,60 L45,70 Z" fill="#E11D48" />
+      {/* Right Wing (Red) */}
+      <path d="M50,40 L85,15 L74.5,37 L85,42.5 L70,53 L80,60 L55,70 Z" fill="#E11D48" />
+      {/* Golden Head/Beak */}
+      <path d="M50,11 L62,34 L50,38 L38,34 Z" fill="#FBBF24" />
+      {/* Body Structure (White/Silver with outer lines) */}
+      <path d="M50,38 L58,74 L50,88 L42,74 Z" fill="#F8FAFC" stroke="#CBD5E1" strokeWidth="1.5" />
+      {/* Golden Symmetrical Tail Details */}
+      <path d="M50,66 L55,81 L50,86 L45,81 Z" fill="#FBBF24" />
+    </svg>
+  );
+};
 
 const DEFAULT_CATEGORIES: Category[] = [
   { id: '1', name: 'Makanan & Minuman', color: '#3b82f6' },
@@ -67,52 +92,100 @@ export default function App() {
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Local Storage
+  // Firebase Auth and Real-time Synchronizations
+  const [user, setUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
   useEffect(() => {
-    const savedTransactions = localStorage.getItem('pettycash_transactions');
-    const savedCategories = localStorage.getItem('pettycash_categories');
-    const savedAccounts = localStorage.getItem('pettycash_accounts');
-    if (savedTransactions) setTransactions(JSON.parse(savedTransactions));
-    if (savedCategories) {
-      const parsed = JSON.parse(savedCategories);
-      if (!parsed.some((c: Category) => c.id === 'transfer_cat')) {
-        parsed.push({ id: 'transfer_cat', name: 'Pemindahan Kas', color: '#6366f1' });
-      }
-      setCategories(parsed);
-    } else {
-      setCategories(DEFAULT_CATEGORIES);
-    }
-    if (savedAccounts) {
-      const parsed = JSON.parse(savedAccounts);
-      const updated = parsed.map((acc: Account) => {
-        if (acc.id === 'acc_1' && (acc.name === 'Petty Cash Utama' || acc.name === 'Pettycash +' || acc.name === 'Petty Cash +')) {
-          return { ...acc, name: 'Petty Cash Koperasi' };
-        }
-        if (acc.id === 'acc_2' && acc.name === 'Kas Cadangan') {
-          return { ...acc, name: 'Transfer dari Mas Aris', description: 'Dana masuk dari Mas Aris' };
-        }
-        return acc;
-      });
-      if (!updated.some((acc: Account) => acc.id === 'acc_3')) {
-        updated.push({ id: 'acc_3', name: 'Rekening Lala', description: 'Rekening Lala' });
-      }
-      setAccounts(updated);
-    } else {
-      setAccounts(DEFAULT_ACCOUNTS);
-    }
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+    });
+    return () => unsubscribeAuth();
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('pettycash_transactions', JSON.stringify(transactions));
-  }, [transactions]);
+    if (!user) return;
 
-  useEffect(() => {
-    localStorage.setItem('pettycash_categories', JSON.stringify(categories));
-  }, [categories]);
+    // Synchronize Transactions
+    const unsubscribeTransactions = onSnapshot(collection(db, 'transactions'), (snapshot) => {
+      const list: Transaction[] = [];
+      snapshot.forEach(docSnap => {
+        list.push({ ...docSnap.data(), id: docSnap.id } as Transaction);
+      });
+      list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setTransactions(list);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'transactions');
+    });
 
-  useEffect(() => {
-    localStorage.setItem('pettycash_accounts', JSON.stringify(accounts));
-  }, [accounts]);
+    // Synchronize Categories
+    const unsubscribeCategories = onSnapshot(collection(db, 'categories'), (snapshot) => {
+      if (snapshot.empty) {
+        // Automatically seed with default categories if empty in cloud Firestore
+        DEFAULT_CATEGORIES.forEach(async (cat) => {
+          try {
+            await setDoc(doc(db, 'categories', cat.id), cat);
+          } catch (err) {
+            console.error('Failed to seed category:', err);
+          }
+        });
+      } else {
+        const list: Category[] = [];
+        snapshot.forEach(docSnap => {
+          list.push({ ...docSnap.data(), id: docSnap.id } as Category);
+        });
+        setCategories(list);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'categories');
+    });
+
+    // Synchronize Accounts
+    const unsubscribeAccounts = onSnapshot(collection(db, 'accounts'), (snapshot) => {
+      if (snapshot.empty) {
+        // Automatically seed with default accounts if empty in cloud Firestore
+        DEFAULT_ACCOUNTS.forEach(async (acc) => {
+          try {
+            await setDoc(doc(db, 'accounts', acc.id), acc);
+          } catch (err) {
+            console.error('Failed to seed account:', err);
+          }
+        });
+      } else {
+        const list: Account[] = [];
+        snapshot.forEach(docSnap => {
+          list.push({ ...docSnap.data(), id: docSnap.id } as Account);
+        });
+        setAccounts(list);
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'accounts');
+    });
+
+    return () => {
+      unsubscribeTransactions();
+      unsubscribeCategories();
+      unsubscribeAccounts();
+    };
+  }, [user]);
+
+  const loginWithGoogle = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error('Failed to log in with Google:', error);
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error('Failed to log out:', error);
+    }
+  };
 
   // Calculations
   const getAccountBalance = (accId: string) => {
@@ -259,45 +332,135 @@ export default function App() {
     XLSX.writeFile(wb, `PettyCash_Report_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
   };
 
-  const addTransaction = (t: Omit<Transaction, 'id'>) => {
-    const newTransaction = { ...t, id: crypto.randomUUID() };
-    setTransactions([newTransaction, ...transactions]);
-    setIsFormOpen(false);
+  const addTransaction = async (t: Omit<Transaction, 'id'>) => {
+    const id = crypto.randomUUID();
+    const cleanAmount = Math.round(t.amount);
+    const newTransaction = { 
+      ...t, 
+      id, 
+      amount: cleanAmount,
+      qty: t.qty ? parseFloat(t.qty as any) : undefined,
+      price: t.price ? parseFloat(t.price as any) : undefined
+    };
+    try {
+      await setDoc(doc(db, 'transactions', id), newTransaction);
+      setIsFormOpen(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `transactions/${id}`);
+    }
   };
 
-  const updateTransaction = (id: string, updatedT: Omit<Transaction, 'id'>) => {
-    setTransactions(transactions.map(t => t.id === id ? { ...updatedT, id } : t));
-    setIsFormOpen(false);
-    setEditingTransaction(null);
+  const updateTransaction = async (id: string, updatedT: Omit<Transaction, 'id'>) => {
+    const cleanAmount = Math.round(updatedT.amount);
+    const updatedTransaction = { 
+      ...updatedT, 
+      id, 
+      amount: cleanAmount,
+      qty: updatedT.qty ? parseFloat(updatedT.qty as any) : undefined,
+      price: updatedT.price ? parseFloat(updatedT.price as any) : undefined
+    };
+    try {
+      await setDoc(doc(db, 'transactions', id), updatedTransaction);
+      setIsFormOpen(false);
+      setEditingTransaction(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `transactions/${id}`);
+    }
   };
 
-  const deleteTransaction = (id: string) => {
-    setTransactions(transactions.filter(t => t.id !== id));
+  const deleteTransaction = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'transactions', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `transactions/${id}`);
+    }
   };
 
-  const addCategory = (name: string) => {
+  const addCategory = async (name: string) => {
+    const id = crypto.randomUUID();
     const newCategory: Category = {
-      id: crypto.randomUUID(),
+      id,
       name,
       color: `#${Math.floor(Math.random()*16777215).toString(16)}`
     };
-    setCategories([...categories, newCategory]);
+    try {
+      await setDoc(doc(db, 'categories', id), newCategory);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, `categories/${id}`);
+    }
   };
 
-  const deleteCategory = (id: string) => {
-    setCategories(categories.filter(c => c.id !== id));
+  const deleteCategory = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'categories', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `categories/${id}`);
+    }
   };
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center">
+        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+        <p className="mt-4 text-sm font-medium text-slate-500 animate-pulse">Memuat data Koperasi...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-tr from-slate-900 via-indigo-950 to-slate-900 flex flex-col items-center justify-center p-4">
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="bg-white/5 backdrop-blur-xl p-8 md:p-12 rounded-3xl border border-white/10 shadow-2xl max-w-md w-full text-center relative z-10">
+          <div className="w-16 h-16 bg-gradient-to-br from-rose-500 to-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-rose-950/40 border border-white/20">
+            <GarudaLogo className="w-11 h-11 text-white" />
+          </div>
+          
+          <h2 className="text-2xl font-black text-white tracking-tight mb-2">
+            Petty Cash Koperasi
+          </h2>
+          <p className="text-indigo-400 font-semibold tracking-wider text-xs uppercase mb-6">
+            Garuda Merah Putih
+          </p>
+
+          <p className="text-slate-300 text-sm leading-relaxed mb-8">
+            Gunakan akun Google Koperasi untuk mengakses pencatatan keuangan dan sinkronisasi real-time antar perangkat secara aman.
+          </p>
+
+          <button
+            onClick={loginWithGoogle}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 px-6 rounded-xl transition-all shadow-lg hover:shadow-indigo-500/20 flex items-center justify-center gap-3 active:scale-95 cursor-pointer leading-none"
+          >
+            <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 24 24">
+              <path d="M12.24 10.285V13.4h6.887C18.2 15.614 15.645 18 12.24 18c-3.86 0-7-3.14-7-7s3.14-7 7-7c1.71 0 3.27.61 4.5 1.643l2.425-2.425C17.695 1.83 15.135 1 12.24 1 6.816 1 2.42 5.395 2.42 11s4.395 10 9.82 10c5.66 0 9.42-3.834 9.42-9.43 0-.63-.075-1.127-.19-1.57H12.24z"/>
+            </svg>
+            <span>Masuk dengan Google</span>
+          </button>
+        </div>
+        <a 
+          href="https://id.pngtree.com/free-png-vectors/logo-garuda" 
+          target="_blank" 
+          rel="noopener noreferrer" 
+          className="mt-8 text-slate-500 hover:text-rose-400 text-[10px] font-medium tracking-wide transition-colors cursor-pointer"
+        >
+          Logo Garuda Vector diilhami &amp; dirujuk via PNGTree
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex text-slate-900 bg-slate-50">
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-slate-200 hidden md:flex flex-col sticky top-0 h-screen">
         <div className="p-6">
-          <div className="flex items-center gap-3 text-indigo-600 mb-1">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-              <BarChart3 className="w-5 h-5 text-white" />
+          <div className="flex items-center gap-3 text-rose-600 mb-1">
+            <div className="w-8 h-8 bg-gradient-to-br from-rose-500 to-rose-700 rounded-lg flex items-center justify-center shadow-sm shadow-rose-500/20">
+              <GarudaLogo className="w-5.5 h-5.5 text-white" />
             </div>
-            <span className="font-bold text-xl tracking-tight text-indigo-900">Petty Cash Koperasi</span>
+            <span className="font-bold text-xl tracking-tight text-slate-800">Petty Cash Koperasi</span>
           </div>
         </div>
 
@@ -402,11 +565,27 @@ export default function App() {
                 setEditingTransaction(null);
                 setIsFormOpen(true);
               }}
-              className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors"
+              className="flex items-center gap-2 px-4 py-2 border border-slate-200 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Input Transaksi</span>
             </button>
+
+            {/* Google User Avatar Profile */}
+            <div className="flex items-center gap-2.5 pl-3 border-l border-slate-200">
+              {user.photoURL ? (
+                <img src={user.photoURL} alt="Foto Profil" className="w-8 h-8 rounded-full border border-slate-200 shadow-sm shrink-0" referrerPolicy="no-referrer" />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold text-xs uppercase shrink-0">
+                  {user.displayName?.substring(0, 2) || 'KM'}
+                </div>
+              )}
+              <div className="hidden lg:block text-left">
+                <p className="text-xs font-bold text-slate-800 leading-tight truncate max-w-[120px]">{user.displayName || 'Koperasi Member'}</p>
+                <button onClick={logout} className="text-[10px] text-rose-500 hover:underline hover:text-rose-600 block leading-tight cursor-pointer">Keluar</button>
+              </div>
+              <button onClick={logout} className="lg:hidden text-xs text-rose-500 hover:text-rose-600 font-bold cursor-pointer pr-1 pb-0.5">Keluar</button>
+            </div>
           </div>
         </header>
 
