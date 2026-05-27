@@ -59,7 +59,6 @@ const DEFAULT_CATEGORIES: Category[] = [
 const DEFAULT_ACCOUNTS: Account[] = [
   { id: 'acc_1', name: 'Petty Cash Koperasi', description: 'Kas operasional harian' },
   { id: 'acc_2', name: 'Transfer dari Mas Aris', description: 'Dana masuk dari Mas Aris' },
-  { id: 'acc_3', name: 'Rekening Lala', description: 'Rekening Lala' },
 ];
 
 const safeParseISO = (dateStr: any): Date => {
@@ -144,9 +143,22 @@ export default function App() {
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'accounts'), (snapshot) => {
       const list: Account[] = [];
+      let hasRekeningLala = false;
       snapshot.forEach((docSnap) => {
-        list.push({ id: docSnap.id, ...docSnap.data() } as Account);
+        if (docSnap.id === 'acc_3') {
+          hasRekeningLala = true;
+        } else {
+          list.push({ id: docSnap.id, ...docSnap.data() } as Account);
+        }
       });
+
+      if (hasRekeningLala) {
+        // Automatically delete acc_3 ('Rekening Lala') from Firestore if it exists
+        deleteDoc(doc(db, 'accounts', 'acc_3')).catch((err) => {
+          console.error("Gagal menghapus 'acc_3' dari Firestore:", err);
+        });
+      }
+
       if (list.length > 0) {
         setAccounts(list);
       } else {
