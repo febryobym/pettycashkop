@@ -204,11 +204,23 @@ export default function App() {
           toAccountId: d.toAccountId,
           qty: d.qty,
           unit: d.unit,
-          price: d.price
+          price: d.price,
+          createdAt: d.createdAt
         } as Transaction);
       });
-      // Sort newest dates first
-      list.sort((a, b) => safeParseISO(b.date).getTime() - safeParseISO(a.date).getTime());
+      // Sort newest dates first. If dates are equal, sort by createdAt descending.
+      list.sort((a, b) => {
+        const dateDiff = safeParseISO(b.date).getTime() - safeParseISO(a.date).getTime();
+        if (dateDiff !== 0) return dateDiff;
+        
+        const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        if (aCreated !== bCreated) {
+          return bCreated - aCreated;
+        }
+        
+        return b.id.localeCompare(a.id);
+      });
       setTransactions(list);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'transactions');
@@ -479,6 +491,7 @@ export default function App() {
       type: t.type,
       categoryId: t.categoryId,
       accountId: t.accountId,
+      createdAt: new Date().toISOString(),
     };
     if (t.toAccountId) cleanTx.toAccountId = t.toAccountId;
     if (t.qty !== undefined) cleanTx.qty = Number(t.qty);
@@ -496,6 +509,9 @@ export default function App() {
   };
 
   const updateTransaction = async (id: string, updatedT: Omit<Transaction, 'id'>) => {
+    const existingTx = transactions.find(tx => tx.id === id);
+    const createdAt = existingTx?.createdAt || new Date().toISOString();
+    
     const cleanTx: Record<string, any> = {
       date: updatedT.date,
       description: updatedT.description,
@@ -503,6 +519,7 @@ export default function App() {
       type: updatedT.type,
       categoryId: updatedT.categoryId,
       accountId: updatedT.accountId,
+      createdAt,
     };
     if (updatedT.toAccountId) cleanTx.toAccountId = updatedT.toAccountId;
     if (updatedT.qty !== undefined) cleanTx.qty = Number(updatedT.qty);

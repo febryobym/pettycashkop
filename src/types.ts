@@ -24,6 +24,7 @@ export interface Transaction {
   qty?: number;
   unit?: string;
   price?: number;
+  createdAt?: string;
 }
 
 export interface MonthlySummary {
