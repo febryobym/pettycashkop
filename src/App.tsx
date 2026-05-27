@@ -62,6 +62,44 @@ const DEFAULT_ACCOUNTS: Account[] = [
   { id: 'acc_3', name: 'Rekening Lala', description: 'Rekening Lala' },
 ];
 
+const safeParseISO = (dateStr: any): Date => {
+  if (!dateStr) return new Date();
+  if (dateStr instanceof Date) return isNaN(dateStr.getTime()) ? new Date() : dateStr;
+  
+  const str = String(dateStr).trim();
+  
+  // Try standard parseISO
+  try {
+    const d = parseISO(str);
+    if (!isNaN(d.getTime())) {
+      return d;
+    }
+  } catch (e) {}
+
+  // Try parsing dd-MM-yyyy or dd/MM/yyyy
+  try {
+    const parts = str.split(/[-/]/);
+    if (parts.length === 3) {
+      // Check if it's yyyy-MM-dd
+      if (parts[0].length === 4) {
+        const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        if (!isNaN(d.getTime())) return d;
+      } else {
+        // dd-MM-yyyy or dd/MM/yyyy
+        const d = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+        if (!isNaN(d.getTime())) return d;
+      }
+    }
+  } catch (e) {}
+
+  const fb = new Date(str);
+  if (!isNaN(fb.getTime())) {
+    return fb;
+  }
+
+  return new Date();
+};
+
 export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
@@ -148,13 +186,15 @@ export default function App() {
         } as Transaction);
       });
       // Sort newest dates first
-      list.sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime());
+      list.sort((a, b) => safeParseISO(b.date).getTime() - safeParseISO(a.date).getTime());
       setTransactions(list);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, 'transactions');
     });
     return () => unsub();
   }, []);
+
+  const [localCount, setLocalCount] = useState(0);
 
   // Detect and flag if there is local unmigrated localStorage data
   useEffect(() => {
@@ -163,8 +203,11 @@ export default function App() {
       const migrated = localStorage.getItem('pettycash_transactions_migrated');
       if (localTxRaw) {
         const txs = JSON.parse(localTxRaw) as Transaction[];
-        if (txs.length > 0 && migrated !== 'true') {
-          setShowMigrationBanner(true);
+        if (txs.length > 0) {
+          setLocalCount(txs.length);
+          if (migrated !== 'true') {
+            setShowMigrationBanner(true);
+          }
         }
       }
     } catch (e) {
@@ -172,8 +215,15 @@ export default function App() {
     }
   }, []);
 
+  const [migrationSucceeded, setMigrationSucceeded] = useState(0);
+  const [migrationFailed, setMigrationFailed] = useState(0);
+  const [migrationTotal, setMigrationTotal] = useState(0);
+
   const handleMigration = async () => {
     setMigrationStatus('running');
+    setMigrationSucceeded(0);
+    setMigrationFailed(0);
+    
     try {
       const localTxRaw = localStorage.getItem('pettycash_transactions');
       const localTx: Transaction[] = localTxRaw ? JSON.parse(localTxRaw) : [];
@@ -184,41 +234,71 @@ export default function App() {
       const localAccRaw = localStorage.getItem('pettycash_accounts');
       const localAcc: Account[] = localAccRaw ? JSON.parse(localAccRaw) : [];
 
-      // Migrate custom categories first
+      setMigrationTotal(localTx.length);
+
+      // 1. Migrate custom categories safely
       for (const cat of localCat) {
-        const cleanCat = { name: cat.name, color: cat.color };
-        await setDoc(doc(db, 'categories', cat.id), cleanCat);
+        try {
+          const cleanCat = { name: cat.name, color: cat.color };
+          await setDoc(doc(db, 'categories', cat.id), cleanCat);
+        } catch (catErr) {
+          console.error(`Gagal memindahkan kategori ${cat.name || cat.id}:`, catErr);
+        }
       }
 
-      // Migrate custom accounts
+      // 2. Migrate custom accounts safely
       for (const acc of localAcc) {
-        const cleanAcc = { name: acc.name, description: acc.description || '' };
-        await setDoc(doc(db, 'accounts', acc.id), cleanAcc);
+        try {
+          const cleanAcc = { name: acc.name, description: acc.description || '' };
+          await setDoc(doc(db, 'accounts', acc.id), cleanAcc);
+        } catch (accErr) {
+          console.error(`Gagal memindahkan rekening/akun ${acc.name || acc.id}:`, accErr);
+        }
       }
 
-      // Migrate transactions
-      for (const tx of localTx) {
-        const cleanTx: Record<string, any> = {
-          date: tx.date || new Date().toISOString().split('T')[0],
-          description: tx.description || '',
-          amount: Number(tx.amount) || 0,
-          type: tx.type || 'expense',
-          categoryId: tx.categoryId || '5',
-          accountId: tx.accountId || 'acc_1',
-        };
-        if (tx.toAccountId) cleanTx.toAccountId = tx.toAccountId;
-        if (tx.qty !== undefined) cleanTx.qty = Number(tx.qty);
-        if (tx.unit) cleanTx.unit = tx.unit;
-        if (tx.price !== undefined) cleanTx.price = Number(tx.price);
+      // 3. Migrate transactions one-by-one safely
+      let successCount = 0;
+      let failCount = 0;
 
-        await setDoc(doc(db, 'transactions', tx.id), cleanTx);
+      for (const tx of localTx) {
+        try {
+          // Format date to YYYY-MM-DD safely
+          let cleanDate = tx.date;
+          try {
+            const parsed = safeParseISO(tx.date);
+            cleanDate = format(parsed, 'yyyy-MM-dd');
+          } catch (dateErr) {
+            cleanDate = new Date().toISOString().split('T')[0];
+          }
+
+          const cleanTx: Record<string, any> = {
+            date: cleanDate || new Date().toISOString().split('T')[0],
+            description: tx.description || '',
+            amount: Number(tx.amount) || 0,
+            type: tx.type || 'expense',
+            categoryId: tx.categoryId || '5',
+            accountId: tx.accountId || 'acc_1',
+          };
+          if (tx.toAccountId) cleanTx.toAccountId = tx.toAccountId;
+          if (tx.qty !== undefined) cleanTx.qty = Number(tx.qty);
+          if (tx.unit) cleanTx.unit = tx.unit;
+          if (tx.price !== undefined) cleanTx.price = Number(tx.price);
+
+          await setDoc(doc(db, 'transactions', tx.id), cleanTx);
+          successCount++;
+          setMigrationSucceeded(successCount);
+        } catch (txErr) {
+          console.error(`Gagal memindahkan transaksi ID ${tx.id} (${tx.description || ''}):`, txErr);
+          failCount++;
+          setMigrationFailed(failCount);
+        }
       }
 
       localStorage.setItem('pettycash_transactions_migrated', 'true');
       setMigrationStatus('done');
-      setTimeout(() => setShowMigrationBanner(false), 4500);
+      setTimeout(() => setShowMigrationBanner(false), 12000);
     } catch (e) {
-      console.error(e);
+      console.error("Kesalahan umum saat migrasi:", e);
       setMigrationStatus('error');
     }
   };
@@ -258,12 +338,12 @@ export default function App() {
   
   const years = React.useMemo(() => {
     const yearsSet = new Set<number>([new Date().getFullYear()]);
-    transactions.forEach(t => yearsSet.add(parseISO(t.date).getFullYear()));
+    transactions.forEach(t => yearsSet.add(safeParseISO(t.date).getFullYear()));
     return Array.from(yearsSet).sort((a, b) => b - a);
   }, [transactions]);
 
   const filteredTransactions = transactions.filter(t => {
-    const date = parseISO(t.date);
+    const date = safeParseISO(t.date);
     const dateMatch = date.getMonth() === filterMonth && date.getFullYear() === filterYear;
     
     let accountMatch = false;
@@ -313,7 +393,7 @@ export default function App() {
   }, [transactions, searchQuery, categories, accounts]);
 
   const monthTransactions = transactions.filter(t => {
-    const date = parseISO(t.date);
+    const date = safeParseISO(t.date);
     return date.getMonth() === filterMonth && date.getFullYear() === filterYear;
   });
 
@@ -577,62 +657,74 @@ export default function App() {
                 initial={{ opacity: 0, y: -15 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -15 }}
-                className="bg-indigo-50 border border-indigo-150 rounded-2xl p-5 shadow-sm relative overflow-hidden"
+                className="bg-gradient-to-r from-indigo-50 to-indigo-100 border border-indigo-200 rounded-2xl p-6 shadow-md relative overflow-hidden"
               >
-                <div className="absolute right-0 bottom-0 translate-x-10 translate-y-10 opacity-[0.03] pointer-events-none">
+                <div className="absolute right-0 bottom-0 translate-x-10 translate-y-10 opacity-[0.04] pointer-events-none">
                   <Database className="w-48 h-48 text-indigo-950" />
                 </div>
                 
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-5 relative z-10">
                   <div className="flex items-start gap-3.5">
-                    <div className="p-2.5 bg-indigo-600/10 rounded-xl text-indigo-600 shrink-0 mt-0.5">
-                      <CloudUpload className="w-5 h-5" />
+                    <div className="p-3 bg-indigo-600/10 rounded-xl text-indigo-600 shrink-0 mt-0.5 shadow-sm">
+                      <CloudUpload className="w-5 h-5 animate-pulse" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-slate-800 text-sm">Pindahkan Data ke Cloud Koperasi Garuda</h4>
-                      <p className="text-slate-500 text-xs mt-0.5 leading-relaxed max-w-2xl">
-                        Kami mendeteksi data transaksi lokal tersimpan di browser Anda. Pindahkan data ini ke Google Cloud Firestore secara otomatis agar bisa diakses oleh komputer, HP, dan pengurus Koperasi lainnya secara real-time.
+                      <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                        Pindahkan Data Lokal ke Google Cloud Koperasi
+                        {localCount > 0 && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-indigo-600 text-white font-mono">
+                            {localCount} Transaksi Terdeteksi
+                          </span>
+                        )}
+                      </h4>
+                      <p className="text-slate-500 text-xs mt-1 leading-relaxed max-w-2xl">
+                        Kami mendeteksi data transaksi lama tersimpan di memori lokal browser Anda (termasuk bulan April & Mei). Pindahkan seluruh data ini ke Google Cloud Firestore (Koperasi Garuda) agar tersimpan permanen dan tersinkronisasi di HP & Laptop pengurus lainnya secara otomatis.
                       </p>
                     </div>
                   </div>
                   
-                  <div className="shrink-0 flex items-center gap-2 self-end md:self-center">
+                  <div className="shrink-0 flex items-center gap-3 self-end md:self-center">
                     {migrationStatus === 'idle' && (
                       <button
                         onClick={handleMigration}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition-all active:scale-95 shadow-lg shadow-indigo-100 inline-flex items-center gap-2 scale-100 hover:scale-[1.02]"
+                        className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition-all active:scale-95 shadow-md shadow-indigo-200 inline-flex items-center gap-2 scale-100 hover:scale-[1.02]"
                       >
                         <CloudUpload className="w-3.5 h-3.5" />
-                        Migrasikan Sekarang
+                        Salin ke Google Cloud
                       </button>
                     )}
                     {migrationStatus === 'running' && (
-                      <span className="px-4 py-2 bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs inline-flex items-center gap-2">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        Memproses Migrasi...
-                      </span>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="px-4 py-2 bg-indigo-100 text-indigo-700 font-extrabold rounded-xl text-xs inline-flex items-center gap-2 border border-indigo-200 shadow-sm font-mono">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                          Menyalin: {migrationSucceeded} / {migrationTotal} data
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-medium">Jangan tutup browser...</span>
+                      </div>
                     )}
                     {migrationStatus === 'done' && (
-                      <span className="px-4 py-1.5 bg-emerald-100 text-emerald-800 font-bold rounded-xl text-xs inline-flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 animate-bounce text-emerald-600" />
-                        Migrasi Berhasil!
+                      <span className="px-4 py-2 bg-emerald-150 text-emerald-900 border border-emerald-250 font-bold rounded-xl text-xs inline-flex items-center gap-1.5 shadow-sm">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 animate-bounce" />
+                        Tersalin {migrationSucceeded} Transaksi!
                       </span>
                     )}
                     {migrationStatus === 'error' && (
                       <button
                         onClick={handleMigration}
-                        className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-all"
+                        className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-rose-100"
                       >
                         Gagal, Coba Lagi
                       </button>
                     )}
                     
-                    <button
-                      onClick={() => setShowMigrationBanner(false)}
-                      className="p-1 px-2 text-slate-400 hover:text-slate-650 rounded-lg hover:bg-indigo-100/40 text-xs font-semibold"
-                    >
-                      Batal
-                    </button>
+                    {migrationStatus !== 'running' && (
+                      <button
+                        onClick={() => setShowMigrationBanner(false)}
+                        className="p-1 px-2.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-indigo-100/40 text-xs font-semibold"
+                      >
+                        Tutup
+                      </button>
+                    )}
                   </div>
                 </div>
               </motion.div>
@@ -927,7 +1019,7 @@ function TransactionRow({
 
   return (
     <tr className="hover:bg-slate-50/50 transition-colors group">
-      <td className="px-4 py-3 whitespace-nowrap text-slate-600 font-medium">{format(parseISO(transaction.date), 'dd MMM yyyy')}</td>
+      <td className="px-4 py-3 whitespace-nowrap text-slate-600 font-medium">{format(safeParseISO(transaction.date), 'dd MMM yyyy')}</td>
       <td className="px-4 py-3">
         <div className="flex flex-col">
           <span className="font-semibold text-slate-800">{transaction.description}</span>
@@ -1319,7 +1411,7 @@ function ReportsView({ transactions, categories }: { transactions: Transaction[]
     const summary: Record<string, { income: number, expense: number }> = {};
     
     transactions.forEach(t => {
-      const monthKey = format(parseISO(t.date), 'yyyy-MM');
+      const monthKey = format(safeParseISO(t.date), 'yyyy-MM');
       if (!summary[monthKey]) summary[monthKey] = { income: 0, expense: 0 };
       if (t.type === 'income') summary[monthKey].income += t.amount;
       else if (t.type === 'expense') summary[monthKey].expense += t.amount;
@@ -1327,7 +1419,7 @@ function ReportsView({ transactions, categories }: { transactions: Transaction[]
 
     return Object.entries(summary)
       .map(([month, data]) => ({
-        month: format(parseISO(`${month}-01`), 'MMM yyyy'),
+        month: format(safeParseISO(`${month}-01`), 'MMM yyyy'),
         income: data.income,
         expense: data.expense,
         balance: data.income - data.expense

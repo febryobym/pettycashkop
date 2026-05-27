@@ -9,7 +9,7 @@ service cloud.firestore {
     
     // Helpers
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() <= 256;
     }
     
     function incoming() {
@@ -22,31 +22,31 @@ service cloud.firestore {
     
     function isValidTransaction(data) {
       return data.keys().hasAll(['date', 'description', 'amount', 'type', 'categoryId', 'accountId'])
-        && data.keys().size() <= 10
-        && data.date is string && data.date.size() <= 50
-        && data.description is string && data.description.size() <= 500
-        && (data.amount is number || data.amount is int) && data.amount >= 0
+        && data.keys().size() <= 20
+        && data.date is string && data.date.size() <= 100
+        && data.description is string && data.description.size() <= 5000
+        && (data.amount is number || data.amount is int)
         && data.type is string && (data.type == 'income' || data.type == 'expense' || data.type == 'transfer')
-        && data.categoryId is string && data.categoryId.size() <= 128
-        && data.accountId is string && data.accountId.size() <= 128
-        && (!data.keys().contains('toAccountId') || (data.toAccountId is string && data.toAccountId.size() <= 128))
-        && (!data.keys().contains('qty') || ((data.qty is number || data.qty is int) && data.qty >= 0))
-        && (!data.keys().contains('unit') || (data.unit is string && data.unit.size() <= 50))
-        && (!data.keys().contains('price') || ((data.price is number || data.price is int) && data.price >= 0));
+        && data.categoryId is string && data.categoryId.size() <= 256
+        && data.accountId is string && data.accountId.size() <= 256
+        && (!data.keys().contains('toAccountId') || (data.toAccountId is string && data.toAccountId.size() <= 256))
+        && (!data.keys().contains('qty') || ((data.qty is number || data.qty is int)))
+        && (!data.keys().contains('unit') || (data.unit is string && data.unit.size() <= 200))
+        && (!data.keys().contains('price') || ((data.price is number || data.price is int)));
     }
     
     function isValidCategory(data) {
       return data.keys().hasAll(['name', 'color'])
-        && data.keys().size() <= 4
-        && data.name is string && data.name.size() <= 100
-        && data.color is string && data.color.size() <= 10;
+        && data.keys().size() <= 10
+        && data.name is string && data.name.size() <= 250
+        && data.color is string && data.color.size() <= 20;
     }
     
     function isValidAccount(data) {
       return data.keys().hasAll(['name'])
-        && data.keys().size() <= 3
-        && data.name is string && data.name.size() <= 100
-        && (!data.keys().contains('description') || (data.description is string && data.description.size() <= 500));
+        && data.keys().size() <= 10
+        && data.name is string && data.name.size() <= 250
+        && (!data.keys().contains('description') || (data.description is string && data.description.size() <= 2000));
     }
 
     match /transactions/{transactionId} {
