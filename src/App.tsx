@@ -58,7 +58,7 @@ const DEFAULT_CATEGORIES: Category[] = [
 
 const DEFAULT_ACCOUNTS: Account[] = [
   { id: 'acc_1', name: 'Petty Cash Koperasi', description: 'Kas operasional harian' },
-  { id: 'acc_2', name: 'Transfer dari Mas Aris', description: 'Dana masuk dari Mas Aris' },
+  { id: 'acc_2', name: 'Margin Mas Aris', description: 'Dana masuk dari Mas Aris' },
 ];
 
 const safeParseISO = (dateStr: any): Date => {
@@ -154,11 +154,16 @@ export default function App() {
     const unsub = onSnapshot(collection(db, 'accounts'), (snapshot) => {
       const list: Account[] = [];
       let hasRekeningLala = false;
+      let oldMasArisDocData: any = null;
       snapshot.forEach((docSnap) => {
         if (docSnap.id === 'acc_3') {
           hasRekeningLala = true;
         } else {
-          list.push({ id: docSnap.id, ...docSnap.data() } as Account);
+          const data = docSnap.data();
+          if (docSnap.id === 'acc_2' && data.name === 'Transfer dari Mas Aris') {
+            oldMasArisDocData = data;
+          }
+          list.push({ id: docSnap.id, ...data } as Account);
         }
       });
 
@@ -169,8 +174,22 @@ export default function App() {
         });
       }
 
+      if (oldMasArisDocData) {
+        // Automatically update acc_2 ('Transfer dari Mas Aris' to 'Margin Mas Aris') in Firestore
+        setDoc(doc(db, 'accounts', 'acc_2'), { ...oldMasArisDocData, name: 'Margin Mas Aris' }, { merge: true }).catch((err) => {
+          console.error("Gagal mengubah nama acc_2 di Firestore:", err);
+        });
+      }
+
       if (list.length > 0) {
-        setAccounts(list);
+        // Map the loaded list locally too in case the database update hasn't propagated back yet
+        const mappedList = list.map(acc => {
+          if (acc.id === 'acc_2' && acc.name === 'Transfer dari Mas Aris') {
+            return { ...acc, name: 'Margin Mas Aris' };
+          }
+          return acc;
+        });
+        setAccounts(mappedList);
       } else {
         // Seed standard default accounts if Firestore is completely fresh
         DEFAULT_ACCOUNTS.forEach(async (a) => {
