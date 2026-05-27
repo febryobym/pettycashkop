@@ -15,7 +15,8 @@ import {
   X,
   Edit,
   ArrowRightLeft,
-  Briefcase
+  Briefcase,
+  Search
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, isWithinInterval, parseISO } from 'date-fns';
@@ -64,6 +65,7 @@ export default function App() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [filterMonth, setFilterMonth] = useState(new Date().getMonth());
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
+  const [searchQuery, setSearchQuery] = useState('');
   
   // Local Storage
   useEffect(() => {
@@ -177,6 +179,29 @@ export default function App() {
     
     return dateMatch && accountMatch;
   });
+
+  const filteredTransactionsTab = React.useMemo(() => {
+    if (!searchQuery.trim()) return transactions;
+    const query = searchQuery.toLowerCase().trim();
+    return transactions.filter(t => {
+      const category = categories.find(c => c.id === t.categoryId);
+      const categoryName = category ? category.name.toLowerCase() : '';
+      const account = accounts.find(a => a.id === t.accountId);
+      const accountName = account ? account.name.toLowerCase() : '';
+      const toAccount = t.toAccountId ? accounts.find(a => a.id === t.toAccountId) : null;
+      const toAccountName = toAccount ? toAccount.name.toLowerCase() : '';
+
+      return (
+        t.description.toLowerCase().includes(query) ||
+        categoryName.includes(query) ||
+        accountName.includes(query) ||
+        toAccountName.includes(query) ||
+        t.amount.toString().includes(query) ||
+        (t.price && t.price.toString().includes(query)) ||
+        (t.qty && t.qty.toString().includes(query))
+      );
+    });
+  }, [transactions, searchQuery, categories, accounts]);
 
   const monthTransactions = transactions.filter(t => {
     const date = parseISO(t.date);
@@ -488,8 +513,26 @@ export default function App() {
 
           {activeTab === 'transactions' && (
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="p-4 border-b border-slate-100">
+              <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <h3 className="font-bold text-slate-800">Semua Transaksi</h3>
+                <div className="relative max-w-sm w-full">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Cari transaksi (keterangan, kategori, akun)..."
+                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all placeholder:text-slate-400"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors p-0.5 rounded-full hover:bg-slate-100"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
               <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 text-slate-500">
@@ -502,7 +545,7 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {transactions.map(t => (
+                  {filteredTransactionsTab.map(t => (
                     <TransactionRow 
                       key={t.id} 
                       transaction={t} 
@@ -521,6 +564,11 @@ export default function App() {
               {transactions.length === 0 && (
                 <div className="text-center py-20 text-slate-400">
                   <p>Mulai dengan menambahkan transaksi pertama Anda!</p>
+                </div>
+              )}
+              {transactions.length > 0 && filteredTransactionsTab.length === 0 && (
+                <div className="text-center py-20 text-slate-400">
+                  <p>Tidak ada transaksi yang cocok dengan pencarian Anda.</p>
                 </div>
               )}
             </div>
@@ -1019,14 +1067,13 @@ function TransactionModal({ categories, accounts, onClose, onSubmit, initialData
           <div className="space-y-1.5 p-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Jumlah (Rp)</label>
             <input 
-              type="number" 
+              type="text" 
               required
               readOnly
               placeholder="0"
               className="w-full px-4 py-2 bg-transparent outline-none font-bold text-xl text-slate-900 cursor-default"
-              value={formData.amount}
+              value={formData.amount ? new Intl.NumberFormat('id-ID').format(parseFloat(formData.amount)) : '0'}
             />
-            <p className="text-[10px] text-slate-400 italic font-medium">* Otomatis: Qty × Harga</p>
           </div>
 
           <button className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold mt-4 hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 active:scale-95 leading-none">
