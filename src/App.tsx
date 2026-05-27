@@ -397,11 +397,10 @@ export default function App() {
                   color="rose"
                 />
                 <StatCard 
-                  label="Total Transaksi" 
-                  value={monthTransactionsCount} 
-                  icon={<ClipboardList className="w-5 h-5" />}
+                  label="Saldo Saat Ini" 
+                  value={totalBalance} 
+                  icon={<Wallet className="w-5 h-5" />}
                   color="blue"
-                  isCount
                 />
               </div>
 
@@ -475,12 +474,6 @@ export default function App() {
                         </div>
                       </div>
                     ))}
-                    
-                    <div className="bg-indigo-900 rounded-2xl p-6 text-white shadow-xl shadow-indigo-100 relative overflow-hidden mt-2">
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 blur-2xl" />
-                      <p className="text-xs text-indigo-300 uppercase tracking-widest font-bold mb-1 z-10 relative">Saldo Saat Ini</p>
-                      <p className="text-3xl font-bold z-10 relative italic">{formatCurrency(totalBalance)}</p>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -832,7 +825,8 @@ function TransactionModal({ categories, accounts, onClose, onSubmit, initialData
     const p = parseFloat(formData.price) || 0;
     const total = q * p;
     if (total > 0) {
-      setFormData(prev => ({ ...prev, amount: total.toString() }));
+      // Bulatkan total jumlah apabila memiliki nilai desimal
+      setFormData(prev => ({ ...prev, amount: Math.round(total).toString() }));
     }
   }, [formData.qty, formData.price]);
 
@@ -853,7 +847,7 @@ function TransactionModal({ categories, accounts, onClose, onSubmit, initialData
     onSubmit({
       ...formData,
       categoryId: finalCategoryId,
-      amount: parseFloat(formData.amount),
+      amount: Math.round(parseFloat(formData.amount)),
       qty: parseFloat(formData.qty) || undefined,
       price: parseFloat(formData.price) || undefined,
       unit: formData.unit || undefined
@@ -1178,7 +1172,7 @@ function ReportsView({ transactions, categories }: { transactions: Transaction[]
               <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Bulan</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Pemasukan</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Pengeluaran</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">Netto</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">Saldo Akhir</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
