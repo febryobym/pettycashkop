@@ -16,13 +16,20 @@ import {
   Edit,
   ArrowRightLeft,
   Briefcase,
-  Search
+  Search,
+  CloudUpload,
+  AlertCircle,
+  Loader2,
+  Database,
+  CheckCircle2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, isWithinInterval, parseISO } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { cn, formatCurrency } from './lib/utils';
 import { Transaction, Category, TransactionType, MonthlySummary, Account } from './types';
+import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from './firebase';
 import {
   BarChart,
   Bar,
@@ -55,6 +62,44 @@ const DEFAULT_ACCOUNTS: Account[] = [
   { id: 'acc_3', name: 'Rekening Lala', description: 'Rekening Lala' },
 ];
 
+const safeParseISO = (dateStr: any): Date => {
+  if (!dateStr) return new Date();
+  if (dateStr instanceof Date) return isNaN(dateStr.getTime()) ? new Date() : dateStr;
+  
+  const str = String(dateStr).trim();
+  
+  // Try standard parseISO
+  try {
+    const d = parseISO(str);
+    if (!isNaN(d.getTime())) {
+      return d;
+    }
+  } catch (e) {}
+
+  // Try parsing dd-MM-yyyy or dd/MM/yyyy
+  try {
+    const parts = str.split(/[-/]/);
+    if (parts.length === 3) {
+      // Check if it's yyyy-MM-dd
+      if (parts[0].length === 4) {
+        const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        if (!isNaN(d.getTime())) return d;
+      } else {
+        // dd-MM-yyyy or dd/MM/yyyy
+        const d = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+        if (!isNaN(d.getTime())) return d;
+      }
+    }
+  } catch (e) {}
+
+  const fb = new Date(str);
+  if (!isNaN(fb.getTime())) {
+    return fb;
+  }
+
+  return new Date();
+};
+
 export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
@@ -67,52 +112,196 @@ export default function App() {
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Local Storage
+  const [migrationStatus, setMigrationStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [showMigrationBanner, setShowMigrationBanner] = useState(false);
+
+  // Synchronize Firestore categories in real-time
   useEffect(() => {
-    const savedTransactions = localStorage.getItem('pettycash_transactions');
-    const savedCategories = localStorage.getItem('pettycash_categories');
-    const savedAccounts = localStorage.getItem('pettycash_accounts');
-    if (savedTransactions) setTransactions(JSON.parse(savedTransactions));
-    if (savedCategories) {
-      const parsed = JSON.parse(savedCategories);
-      if (!parsed.some((c: Category) => c.id === 'transfer_cat')) {
-        parsed.push({ id: 'transfer_cat', name: 'Pemindahan Kas', color: '#6366f1' });
-      }
-      setCategories(parsed);
-    } else {
-      setCategories(DEFAULT_CATEGORIES);
-    }
-    if (savedAccounts) {
-      const parsed = JSON.parse(savedAccounts);
-      const updated = parsed.map((acc: Account) => {
-        if (acc.id === 'acc_1' && (acc.name === 'Petty Cash Utama' || acc.name === 'Pettycash +' || acc.name === 'Petty Cash +')) {
-          return { ...acc, name: 'Petty Cash Koperasi' };
-        }
-        if (acc.id === 'acc_2' && acc.name === 'Kas Cadangan') {
-          return { ...acc, name: 'Transfer dari Mas Aris', description: 'Dana masuk dari Mas Aris' };
-        }
-        return acc;
+    const unsub = onSnapshot(collection(db, 'categories'), (snapshot) => {
+      const list: Category[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as Category);
       });
-      if (!updated.some((acc: Account) => acc.id === 'acc_3')) {
-        updated.push({ id: 'acc_3', name: 'Rekening Lala', description: 'Rekening Lala' });
+      if (list.length > 0) {
+        setCategories(list);
+      } else {
+        // Seed standard default categories if Firestore list is completely fresh
+        DEFAULT_CATEGORIES.forEach(async (c) => {
+          try {
+            await setDoc(doc(db, 'categories', c.id), { name: c.name, color: c.color });
+          } catch (e) {
+            console.error("Error seeding categories:", e);
+          }
+        });
       }
-      setAccounts(updated);
-    } else {
-      setAccounts(DEFAULT_ACCOUNTS);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'categories');
+    });
+    return () => unsub();
+  }, []);
+
+  // Synchronize Firestore accounts in real-time
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'accounts'), (snapshot) => {
+      const list: Account[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as Account);
+      });
+      if (list.length > 0) {
+        setAccounts(list);
+      } else {
+        // Seed standard default accounts if Firestore is completely fresh
+        DEFAULT_ACCOUNTS.forEach(async (a) => {
+          try {
+            await setDoc(doc(db, 'accounts', a.id), { name: a.name, description: a.description || '' });
+          } catch (e) {
+            console.error("Error seeding accounts:", e);
+          }
+        });
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'accounts');
+    });
+    return () => unsub();
+  }, []);
+
+  // Synchronize Firestore transactions in real-time
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'transactions'), (snapshot) => {
+      const list: Transaction[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          date: d.date,
+          description: d.description,
+          amount: d.amount,
+          type: d.type,
+          categoryId: d.categoryId,
+          accountId: d.accountId,
+          toAccountId: d.toAccountId,
+          qty: d.qty,
+          unit: d.unit,
+          price: d.price
+        } as Transaction);
+      });
+      // Sort newest dates first
+      list.sort((a, b) => safeParseISO(b.date).getTime() - safeParseISO(a.date).getTime());
+      setTransactions(list);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'transactions');
+    });
+    return () => unsub();
+  }, []);
+
+  const [localCount, setLocalCount] = useState(0);
+
+  // Detect and flag if there is local unmigrated localStorage data
+  useEffect(() => {
+    try {
+      const localTxRaw = localStorage.getItem('pettycash_transactions');
+      const migrated = localStorage.getItem('pettycash_transactions_migrated');
+      if (localTxRaw) {
+        const txs = JSON.parse(localTxRaw) as Transaction[];
+        if (txs.length > 0) {
+          setLocalCount(txs.length);
+          if (migrated !== 'true') {
+            setShowMigrationBanner(true);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Local storage storage detection issue:", e);
     }
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem('pettycash_transactions', JSON.stringify(transactions));
-  }, [transactions]);
+  const [migrationSucceeded, setMigrationSucceeded] = useState(0);
+  const [migrationFailed, setMigrationFailed] = useState(0);
+  const [migrationTotal, setMigrationTotal] = useState(0);
 
-  useEffect(() => {
-    localStorage.setItem('pettycash_categories', JSON.stringify(categories));
-  }, [categories]);
+  const handleMigration = async () => {
+    setMigrationStatus('running');
+    setMigrationSucceeded(0);
+    setMigrationFailed(0);
+    
+    try {
+      const localTxRaw = localStorage.getItem('pettycash_transactions');
+      const localTx: Transaction[] = localTxRaw ? JSON.parse(localTxRaw) : [];
+      
+      const localCatRaw = localStorage.getItem('pettycash_categories');
+      const localCat: Category[] = localCatRaw ? JSON.parse(localCatRaw) : [];
 
-  useEffect(() => {
-    localStorage.setItem('pettycash_accounts', JSON.stringify(accounts));
-  }, [accounts]);
+      const localAccRaw = localStorage.getItem('pettycash_accounts');
+      const localAcc: Account[] = localAccRaw ? JSON.parse(localAccRaw) : [];
+
+      setMigrationTotal(localTx.length);
+
+      // 1. Migrate custom categories safely
+      for (const cat of localCat) {
+        try {
+          const cleanCat = { name: cat.name, color: cat.color };
+          await setDoc(doc(db, 'categories', cat.id), cleanCat);
+        } catch (catErr) {
+          console.error(`Gagal memindahkan kategori ${cat.name || cat.id}:`, catErr);
+        }
+      }
+
+      // 2. Migrate custom accounts safely
+      for (const acc of localAcc) {
+        try {
+          const cleanAcc = { name: acc.name, description: acc.description || '' };
+          await setDoc(doc(db, 'accounts', acc.id), cleanAcc);
+        } catch (accErr) {
+          console.error(`Gagal memindahkan rekening/akun ${acc.name || acc.id}:`, accErr);
+        }
+      }
+
+      // 3. Migrate transactions one-by-one safely
+      let successCount = 0;
+      let failCount = 0;
+
+      for (const tx of localTx) {
+        try {
+          // Format date to YYYY-MM-DD safely
+          let cleanDate = tx.date;
+          try {
+            const parsed = safeParseISO(tx.date);
+            cleanDate = format(parsed, 'yyyy-MM-dd');
+          } catch (dateErr) {
+            cleanDate = new Date().toISOString().split('T')[0];
+          }
+
+          const cleanTx: Record<string, any> = {
+            date: cleanDate || new Date().toISOString().split('T')[0],
+            description: tx.description || '',
+            amount: Number(tx.amount) || 0,
+            type: tx.type || 'expense',
+            categoryId: tx.categoryId || '5',
+            accountId: tx.accountId || 'acc_1',
+          };
+          if (tx.toAccountId) cleanTx.toAccountId = tx.toAccountId;
+          if (tx.qty !== undefined) cleanTx.qty = Number(tx.qty);
+          if (tx.unit) cleanTx.unit = tx.unit;
+          if (tx.price !== undefined) cleanTx.price = Number(tx.price);
+
+          await setDoc(doc(db, 'transactions', tx.id), cleanTx);
+          successCount++;
+          setMigrationSucceeded(successCount);
+        } catch (txErr) {
+          console.error(`Gagal memindahkan transaksi ID ${tx.id} (${tx.description || ''}):`, txErr);
+          failCount++;
+          setMigrationFailed(failCount);
+        }
+      }
+
+      localStorage.setItem('pettycash_transactions_migrated', 'true');
+      setMigrationStatus('done');
+      setTimeout(() => setShowMigrationBanner(false), 12000);
+    } catch (e) {
+      console.error("Kesalahan umum saat migrasi:", e);
+      setMigrationStatus('error');
+    }
+  };
 
   // Calculations
   const getAccountBalance = (accId: string) => {
@@ -149,12 +338,12 @@ export default function App() {
   
   const years = React.useMemo(() => {
     const yearsSet = new Set<number>([new Date().getFullYear()]);
-    transactions.forEach(t => yearsSet.add(parseISO(t.date).getFullYear()));
+    transactions.forEach(t => yearsSet.add(safeParseISO(t.date).getFullYear()));
     return Array.from(yearsSet).sort((a, b) => b - a);
   }, [transactions]);
 
   const filteredTransactions = transactions.filter(t => {
-    const date = parseISO(t.date);
+    const date = safeParseISO(t.date);
     const dateMatch = date.getMonth() === filterMonth && date.getFullYear() === filterYear;
     
     let accountMatch = false;
@@ -204,7 +393,7 @@ export default function App() {
   }, [transactions, searchQuery, categories, accounts]);
 
   const monthTransactions = transactions.filter(t => {
-    const date = parseISO(t.date);
+    const date = safeParseISO(t.date);
     return date.getMonth() === filterMonth && date.getFullYear() === filterYear;
   });
 
@@ -259,33 +448,79 @@ export default function App() {
     XLSX.writeFile(wb, `PettyCash_Report_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
   };
 
-  const addTransaction = (t: Omit<Transaction, 'id'>) => {
-    const newTransaction = { ...t, id: crypto.randomUUID() };
-    setTransactions([newTransaction, ...transactions]);
-    setIsFormOpen(false);
+  const addTransaction = async (t: Omit<Transaction, 'id'>) => {
+    const id = crypto.randomUUID();
+    const cleanTx: Record<string, any> = {
+      date: t.date,
+      description: t.description,
+      amount: Number(t.amount),
+      type: t.type,
+      categoryId: t.categoryId,
+      accountId: t.accountId,
+    };
+    if (t.toAccountId) cleanTx.toAccountId = t.toAccountId;
+    if (t.qty !== undefined) cleanTx.qty = Number(t.qty);
+    if (t.unit) cleanTx.unit = t.unit;
+    if (t.price !== undefined) cleanTx.price = Number(t.price);
+
+    try {
+      await setDoc(doc(db, 'transactions', id), cleanTx);
+      setIsFormOpen(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `transactions/${id}`);
+    }
   };
 
-  const updateTransaction = (id: string, updatedT: Omit<Transaction, 'id'>) => {
-    setTransactions(transactions.map(t => t.id === id ? { ...updatedT, id } : t));
-    setIsFormOpen(false);
-    setEditingTransaction(null);
+  const updateTransaction = async (id: string, updatedT: Omit<Transaction, 'id'>) => {
+    const cleanTx: Record<string, any> = {
+      date: updatedT.date,
+      description: updatedT.description,
+      amount: Number(updatedT.amount),
+      type: updatedT.type,
+      categoryId: updatedT.categoryId,
+      accountId: updatedT.accountId,
+    };
+    if (updatedT.toAccountId) cleanTx.toAccountId = updatedT.toAccountId;
+    if (updatedT.qty !== undefined) cleanTx.qty = Number(updatedT.qty);
+    if (updatedT.unit) cleanTx.unit = updatedT.unit;
+    if (updatedT.price !== undefined) cleanTx.price = Number(updatedT.price);
+
+    try {
+      await setDoc(doc(db, 'transactions', id), cleanTx);
+      setIsFormOpen(false);
+      setEditingTransaction(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `transactions/${id}`);
+    }
   };
 
-  const deleteTransaction = (id: string) => {
-    setTransactions(transactions.filter(t => t.id !== id));
+  const deleteTransaction = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'transactions', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `transactions/${id}`);
+    }
   };
 
-  const addCategory = (name: string) => {
-    const newCategory: Category = {
-      id: crypto.randomUUID(),
+  const addCategory = async (name: string) => {
+    const id = crypto.randomUUID();
+    const newCategory = {
       name,
       color: `#${Math.floor(Math.random()*16777215).toString(16)}`
     };
-    setCategories([...categories, newCategory]);
+    try {
+      await setDoc(doc(db, 'categories', id), newCategory);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `categories/${id}`);
+    }
   };
 
-  const deleteCategory = (id: string) => {
-    setCategories(categories.filter(c => c.id !== id));
+  const deleteCategory = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'categories', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `categories/${id}`);
+    }
   };
 
   return (
@@ -293,11 +528,11 @@ export default function App() {
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-slate-200 hidden md:flex flex-col sticky top-0 h-screen">
         <div className="p-6">
-          <div className="flex items-center gap-3 text-indigo-600 mb-1">
+          <div className="flex items-center gap-3 text-indigo-600">
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
               <BarChart3 className="w-5 h-5 text-white" />
             </div>
-            <span className="font-bold text-xl tracking-tight text-indigo-900">Petty Cash Koperasi</span>
+            <span className="font-bold text-xl tracking-tight text-indigo-900 font-sans">Petty Cash Koperasi</span>
           </div>
         </div>
 
@@ -699,7 +934,7 @@ function TransactionRow({
 
   return (
     <tr className="hover:bg-slate-50/50 transition-colors group">
-      <td className="px-4 py-3 whitespace-nowrap text-slate-600 font-medium">{format(parseISO(transaction.date), 'dd MMM yyyy')}</td>
+      <td className="px-4 py-3 whitespace-nowrap text-slate-600 font-medium">{format(safeParseISO(transaction.date), 'dd MMM yyyy')}</td>
       <td className="px-4 py-3">
         <div className="flex flex-col">
           <span className="font-semibold text-slate-800">{transaction.description}</span>
@@ -1091,7 +1326,7 @@ function ReportsView({ transactions, categories }: { transactions: Transaction[]
     const summary: Record<string, { income: number, expense: number }> = {};
     
     transactions.forEach(t => {
-      const monthKey = format(parseISO(t.date), 'yyyy-MM');
+      const monthKey = format(safeParseISO(t.date), 'yyyy-MM');
       if (!summary[monthKey]) summary[monthKey] = { income: 0, expense: 0 };
       if (t.type === 'income') summary[monthKey].income += t.amount;
       else if (t.type === 'expense') summary[monthKey].expense += t.amount;
@@ -1099,7 +1334,7 @@ function ReportsView({ transactions, categories }: { transactions: Transaction[]
 
     return Object.entries(summary)
       .map(([month, data]) => ({
-        month: format(parseISO(`${month}-01`), 'MMM yyyy'),
+        month: format(safeParseISO(`${month}-01`), 'MMM yyyy'),
         income: data.income,
         expense: data.expense,
         balance: data.income - data.expense
