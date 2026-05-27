@@ -51,6 +51,7 @@ const DEFAULT_CATEGORIES: Category[] = [
 const DEFAULT_ACCOUNTS: Account[] = [
   { id: 'acc_1', name: 'Petty Cash Koperasi', description: 'Kas operasional harian' },
   { id: 'acc_2', name: 'Transfer dari Mas Aris', description: 'Dana masuk dari Mas Aris' },
+  { id: 'acc_3', name: 'Rekening Lala', description: 'Rekening Lala' },
 ];
 
 export default function App() {
@@ -90,7 +91,12 @@ export default function App() {
         }
         return acc;
       });
+      if (!updated.some((acc: Account) => acc.id === 'acc_3')) {
+        updated.push({ id: 'acc_3', name: 'Rekening Lala', description: 'Rekening Lala' });
+      }
       setAccounts(updated);
+    } else {
+      setAccounts(DEFAULT_ACCOUNTS);
     }
   }, []);
 
