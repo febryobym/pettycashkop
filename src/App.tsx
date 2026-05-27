@@ -103,6 +103,16 @@ export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
   const [accounts, setAccounts] = useState<Account[]>(DEFAULT_ACCOUNTS);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => {
+        setToast(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
   const [activeAccountId, setActiveAccountId] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'categories' | 'reports'>('dashboard');
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -478,8 +488,10 @@ export default function App() {
     try {
       await setDoc(doc(db, 'transactions', id), cleanTx);
       setIsFormOpen(false);
+      setToast({ message: 'Transaksi berhasil disimpan langsung ke Google Cloud!', type: 'success' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `transactions/${id}`);
+      console.error(error);
+      setToast({ message: 'Gagal menyimpan transaksi ke Google Cloud. Pastikan koneksi internet stabil.', type: 'error' });
     }
   };
 
@@ -501,16 +513,20 @@ export default function App() {
       await setDoc(doc(db, 'transactions', id), cleanTx);
       setIsFormOpen(false);
       setEditingTransaction(null);
+      setToast({ message: 'Perubahan transaksi berhasil disimpan!', type: 'success' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `transactions/${id}`);
+      console.error(error);
+      setToast({ message: 'Gagal menyimpan perubahan. Periksa koneksi internet Anda.', type: 'error' });
     }
   };
 
   const deleteTransaction = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'transactions', id));
+      setToast({ message: 'Transaksi berhasil dihapus dari Google Cloud!', type: 'success' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `transactions/${id}`);
+      console.error(error);
+      setToast({ message: 'Gagal menghapus transaksi dari Google Cloud.', type: 'error' });
     }
   };
 
@@ -522,16 +538,20 @@ export default function App() {
     };
     try {
       await setDoc(doc(db, 'categories', id), newCategory);
+      setToast({ message: `Kategori "${name}" berhasil dibuat!`, type: 'success' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `categories/${id}`);
+      console.error(error);
+      setToast({ message: 'Gagal membuat kategori baru ke Google Cloud.', type: 'error' });
     }
   };
 
   const deleteCategory = async (id: string) => {
     try {
       await deleteDoc(doc(db, 'categories', id));
+      setToast({ message: 'Kategori berhasil dihapus dari Google Cloud!', type: 'success' });
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `categories/${id}`);
+      console.error(error);
+      setToast({ message: 'Gagal menghapus kategori.', type: 'error' });
     }
   };
 
@@ -849,6 +869,35 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.9 }}
+            className={cn(
+              "fixed bottom-6 right-6 z-50 p-4 rounded-2xl shadow-2xl flex items-center gap-3 border text-sm font-bold min-w-[320px] max-w-md",
+              toast.type === 'success' 
+                ? "bg-emerald-50 border-emerald-100 text-emerald-900" 
+                : "bg-rose-50 border-rose-100 text-rose-900"
+            )}
+          >
+            {toast.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+            )}
+            <div className="flex-1 leading-snug">{toast.message}</div>
+            <button 
+              onClick={() => setToast(null)}
+              className="p-1 hover:bg-black/5 rounded-lg text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -1120,13 +1169,12 @@ function TransactionModal({ categories, accounts, onClose, onSubmit, initialData
     toAccountId: initialData?.toAccountId || accounts[1]?.id || ''
   });
 
-  // Auto-calculate Total Amount when Qty or Price changes
+  // Auto-calculate Total Amount when Qty and Price are valid
   useEffect(() => {
-    const q = parseFloat(formData.qty) || 0;
-    const p = parseFloat(formData.price) || 0;
-    const total = q * p;
-    if (total > 0) {
-      // Bulatkan total jumlah apabila memiliki nilai desimal
+    const q = parseFloat(formData.qty);
+    const p = parseFloat(formData.price);
+    if (!isNaN(q) && !isNaN(p) && q > 0 && p > 0) {
+      const total = q * p;
       setFormData(prev => ({ ...prev, amount: Math.round(total).toString() }));
     }
   }, [formData.qty, formData.price]);
@@ -1311,16 +1359,22 @@ function TransactionModal({ categories, accounts, onClose, onSubmit, initialData
             </div>
           </div>
 
-          <div className="space-y-1.5 p-4 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Jumlah (Rp)</label>
-            <input 
-              type="text" 
-              required
-              readOnly
-              placeholder="0"
-              className="w-full px-4 py-2 bg-transparent outline-none font-bold text-xl text-slate-900 cursor-default"
-              value={formData.amount ? new Intl.NumberFormat('id-ID').format(parseFloat(formData.amount)) : '0'}
-            />
+          <div className="space-y-1.5 p-4 bg-indigo-50/50 rounded-xl border border-indigo-100 mb-2">
+            <label className="text-xs font-bold text-indigo-700 uppercase tracking-wider block">Total Jumlah / Nominal Akhir (Rp) <span className="text-rose-500">*</span></label>
+            <div className="relative flex items-center">
+              <span className="absolute left-4 font-bold text-slate-400">Rp</span>
+              <input 
+                type="number" 
+                required
+                placeholder="Masukkan jumlah langsung..."
+                className="w-full pl-11 pr-4 py-3 bg-white border border-indigo-200 rounded-xl outline-none font-extrabold text-xl text-indigo-900 focus:ring-2 focus:ring-indigo-150 focus:border-indigo-400 transition-all shadow-sm"
+                value={formData.amount}
+                onChange={e => setFormData({...formData, amount: e.target.value})}
+              />
+            </div>
+            <p className="text-[10px] text-indigo-800 leading-normal">
+              * Ketik nominal langsung di sini, atau isi Qty & Harga di atas agar dihitung otomatis.
+            </p>
           </div>
 
           <button className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold mt-4 hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 active:scale-95 leading-none">
