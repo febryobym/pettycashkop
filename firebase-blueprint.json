@@ -1,0 +1,56 @@
+{
+  "entities": {
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Represents a petty cash transaction",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "description": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["income", "expense", "transfer"] },
+        "categoryId": { "type": "string" },
+        "accountId": { "type": "string" },
+        "toAccountId": { "type": "string" },
+        "qty": { "type": "number" },
+        "unit": { "type": "string" },
+        "price": { "type": "number" }
+      },
+      "required": ["date", "description", "amount", "type", "categoryId", "accountId"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "A transaction category",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "color": { "type": "string" }
+      },
+      "required": ["name", "color"]
+    },
+    "Account": {
+      "title": "Account",
+      "description": "A cash account",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" }
+      },
+      "required": ["name"]
+    }
+  },
+  "firestore": {
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Petty cash transactions collection"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Custom categories list"
+    },
+    "/accounts/{accountId}": {
+      "schema": "Account",
+      "description": "Operational Cash Accounts list"
+    }
+  }
+}

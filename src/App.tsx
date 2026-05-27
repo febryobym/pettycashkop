@@ -16,13 +16,20 @@ import {
   Edit,
   ArrowRightLeft,
   Briefcase,
-  Search
+  Search,
+  CloudUpload,
+  AlertCircle,
+  Loader2,
+  Database,
+  CheckCircle2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, startOfMonth, endOfMonth, eachMonthOfInterval, isWithinInterval, parseISO } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { cn, formatCurrency } from './lib/utils';
 import { Transaction, Category, TransactionType, MonthlySummary, Account } from './types';
+import { collection, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from './firebase';
 import {
   BarChart,
   Bar,
@@ -67,52 +74,154 @@ export default function App() {
   const [filterYear, setFilterYear] = useState(new Date().getFullYear());
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Local Storage
+  const [migrationStatus, setMigrationStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [showMigrationBanner, setShowMigrationBanner] = useState(false);
+
+  // Synchronize Firestore categories in real-time
   useEffect(() => {
-    const savedTransactions = localStorage.getItem('pettycash_transactions');
-    const savedCategories = localStorage.getItem('pettycash_categories');
-    const savedAccounts = localStorage.getItem('pettycash_accounts');
-    if (savedTransactions) setTransactions(JSON.parse(savedTransactions));
-    if (savedCategories) {
-      const parsed = JSON.parse(savedCategories);
-      if (!parsed.some((c: Category) => c.id === 'transfer_cat')) {
-        parsed.push({ id: 'transfer_cat', name: 'Pemindahan Kas', color: '#6366f1' });
-      }
-      setCategories(parsed);
-    } else {
-      setCategories(DEFAULT_CATEGORIES);
-    }
-    if (savedAccounts) {
-      const parsed = JSON.parse(savedAccounts);
-      const updated = parsed.map((acc: Account) => {
-        if (acc.id === 'acc_1' && (acc.name === 'Petty Cash Utama' || acc.name === 'Pettycash +' || acc.name === 'Petty Cash +')) {
-          return { ...acc, name: 'Petty Cash Koperasi' };
-        }
-        if (acc.id === 'acc_2' && acc.name === 'Kas Cadangan') {
-          return { ...acc, name: 'Transfer dari Mas Aris', description: 'Dana masuk dari Mas Aris' };
-        }
-        return acc;
+    const unsub = onSnapshot(collection(db, 'categories'), (snapshot) => {
+      const list: Category[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as Category);
       });
-      if (!updated.some((acc: Account) => acc.id === 'acc_3')) {
-        updated.push({ id: 'acc_3', name: 'Rekening Lala', description: 'Rekening Lala' });
+      if (list.length > 0) {
+        setCategories(list);
+      } else {
+        // Seed standard default categories if Firestore list is completely fresh
+        DEFAULT_CATEGORIES.forEach(async (c) => {
+          try {
+            await setDoc(doc(db, 'categories', c.id), { name: c.name, color: c.color });
+          } catch (e) {
+            console.error("Error seeding categories:", e);
+          }
+        });
       }
-      setAccounts(updated);
-    } else {
-      setAccounts(DEFAULT_ACCOUNTS);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'categories');
+    });
+    return () => unsub();
+  }, []);
+
+  // Synchronize Firestore accounts in real-time
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'accounts'), (snapshot) => {
+      const list: Account[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as Account);
+      });
+      if (list.length > 0) {
+        setAccounts(list);
+      } else {
+        // Seed standard default accounts if Firestore is completely fresh
+        DEFAULT_ACCOUNTS.forEach(async (a) => {
+          try {
+            await setDoc(doc(db, 'accounts', a.id), { name: a.name, description: a.description || '' });
+          } catch (e) {
+            console.error("Error seeding accounts:", e);
+          }
+        });
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'accounts');
+    });
+    return () => unsub();
+  }, []);
+
+  // Synchronize Firestore transactions in real-time
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'transactions'), (snapshot) => {
+      const list: Transaction[] = [];
+      snapshot.forEach((docSnap) => {
+        const d = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          date: d.date,
+          description: d.description,
+          amount: d.amount,
+          type: d.type,
+          categoryId: d.categoryId,
+          accountId: d.accountId,
+          toAccountId: d.toAccountId,
+          qty: d.qty,
+          unit: d.unit,
+          price: d.price
+        } as Transaction);
+      });
+      // Sort newest dates first
+      list.sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime());
+      setTransactions(list);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'transactions');
+    });
+    return () => unsub();
+  }, []);
+
+  // Detect and flag if there is local unmigrated localStorage data
+  useEffect(() => {
+    try {
+      const localTxRaw = localStorage.getItem('pettycash_transactions');
+      const migrated = localStorage.getItem('pettycash_transactions_migrated');
+      if (localTxRaw) {
+        const txs = JSON.parse(localTxRaw) as Transaction[];
+        if (txs.length > 0 && migrated !== 'true') {
+          setShowMigrationBanner(true);
+        }
+      }
+    } catch (e) {
+      console.error("Local storage storage detection issue:", e);
     }
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem('pettycash_transactions', JSON.stringify(transactions));
-  }, [transactions]);
+  const handleMigration = async () => {
+    setMigrationStatus('running');
+    try {
+      const localTxRaw = localStorage.getItem('pettycash_transactions');
+      const localTx: Transaction[] = localTxRaw ? JSON.parse(localTxRaw) : [];
+      
+      const localCatRaw = localStorage.getItem('pettycash_categories');
+      const localCat: Category[] = localCatRaw ? JSON.parse(localCatRaw) : [];
 
-  useEffect(() => {
-    localStorage.setItem('pettycash_categories', JSON.stringify(categories));
-  }, [categories]);
+      const localAccRaw = localStorage.getItem('pettycash_accounts');
+      const localAcc: Account[] = localAccRaw ? JSON.parse(localAccRaw) : [];
 
-  useEffect(() => {
-    localStorage.setItem('pettycash_accounts', JSON.stringify(accounts));
-  }, [accounts]);
+      // Migrate custom categories first
+      for (const cat of localCat) {
+        const cleanCat = { name: cat.name, color: cat.color };
+        await setDoc(doc(db, 'categories', cat.id), cleanCat);
+      }
+
+      // Migrate custom accounts
+      for (const acc of localAcc) {
+        const cleanAcc = { name: acc.name, description: acc.description || '' };
+        await setDoc(doc(db, 'accounts', acc.id), cleanAcc);
+      }
+
+      // Migrate transactions
+      for (const tx of localTx) {
+        const cleanTx: Record<string, any> = {
+          date: tx.date || new Date().toISOString().split('T')[0],
+          description: tx.description || '',
+          amount: Number(tx.amount) || 0,
+          type: tx.type || 'expense',
+          categoryId: tx.categoryId || '5',
+          accountId: tx.accountId || 'acc_1',
+        };
+        if (tx.toAccountId) cleanTx.toAccountId = tx.toAccountId;
+        if (tx.qty !== undefined) cleanTx.qty = Number(tx.qty);
+        if (tx.unit) cleanTx.unit = tx.unit;
+        if (tx.price !== undefined) cleanTx.price = Number(tx.price);
+
+        await setDoc(doc(db, 'transactions', tx.id), cleanTx);
+      }
+
+      localStorage.setItem('pettycash_transactions_migrated', 'true');
+      setMigrationStatus('done');
+      setTimeout(() => setShowMigrationBanner(false), 4500);
+    } catch (e) {
+      console.error(e);
+      setMigrationStatus('error');
+    }
+  };
 
   // Calculations
   const getAccountBalance = (accId: string) => {
@@ -259,33 +368,79 @@ export default function App() {
     XLSX.writeFile(wb, `PettyCash_Report_${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
   };
 
-  const addTransaction = (t: Omit<Transaction, 'id'>) => {
-    const newTransaction = { ...t, id: crypto.randomUUID() };
-    setTransactions([newTransaction, ...transactions]);
-    setIsFormOpen(false);
+  const addTransaction = async (t: Omit<Transaction, 'id'>) => {
+    const id = crypto.randomUUID();
+    const cleanTx: Record<string, any> = {
+      date: t.date,
+      description: t.description,
+      amount: Number(t.amount),
+      type: t.type,
+      categoryId: t.categoryId,
+      accountId: t.accountId,
+    };
+    if (t.toAccountId) cleanTx.toAccountId = t.toAccountId;
+    if (t.qty !== undefined) cleanTx.qty = Number(t.qty);
+    if (t.unit) cleanTx.unit = t.unit;
+    if (t.price !== undefined) cleanTx.price = Number(t.price);
+
+    try {
+      await setDoc(doc(db, 'transactions', id), cleanTx);
+      setIsFormOpen(false);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `transactions/${id}`);
+    }
   };
 
-  const updateTransaction = (id: string, updatedT: Omit<Transaction, 'id'>) => {
-    setTransactions(transactions.map(t => t.id === id ? { ...updatedT, id } : t));
-    setIsFormOpen(false);
-    setEditingTransaction(null);
+  const updateTransaction = async (id: string, updatedT: Omit<Transaction, 'id'>) => {
+    const cleanTx: Record<string, any> = {
+      date: updatedT.date,
+      description: updatedT.description,
+      amount: Number(updatedT.amount),
+      type: updatedT.type,
+      categoryId: updatedT.categoryId,
+      accountId: updatedT.accountId,
+    };
+    if (updatedT.toAccountId) cleanTx.toAccountId = updatedT.toAccountId;
+    if (updatedT.qty !== undefined) cleanTx.qty = Number(updatedT.qty);
+    if (updatedT.unit) cleanTx.unit = updatedT.unit;
+    if (updatedT.price !== undefined) cleanTx.price = Number(updatedT.price);
+
+    try {
+      await setDoc(doc(db, 'transactions', id), cleanTx);
+      setIsFormOpen(false);
+      setEditingTransaction(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `transactions/${id}`);
+    }
   };
 
-  const deleteTransaction = (id: string) => {
-    setTransactions(transactions.filter(t => t.id !== id));
+  const deleteTransaction = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'transactions', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `transactions/${id}`);
+    }
   };
 
-  const addCategory = (name: string) => {
-    const newCategory: Category = {
-      id: crypto.randomUUID(),
+  const addCategory = async (name: string) => {
+    const id = crypto.randomUUID();
+    const newCategory = {
       name,
       color: `#${Math.floor(Math.random()*16777215).toString(16)}`
     };
-    setCategories([...categories, newCategory]);
+    try {
+      await setDoc(doc(db, 'categories', id), newCategory);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `categories/${id}`);
+    }
   };
 
-  const deleteCategory = (id: string) => {
-    setCategories(categories.filter(c => c.id !== id));
+  const deleteCategory = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'categories', id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `categories/${id}`);
+    }
   };
 
   return (
@@ -293,11 +448,15 @@ export default function App() {
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-slate-200 hidden md:flex flex-col sticky top-0 h-screen">
         <div className="p-6">
-          <div className="flex items-center gap-3 text-indigo-600 mb-1">
+          <div className="flex items-center gap-3 text-indigo-600">
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
               <BarChart3 className="w-5 h-5 text-white" />
             </div>
-            <span className="font-bold text-xl tracking-tight text-indigo-900">Petty Cash Koperasi</span>
+            <span className="font-bold text-xl tracking-tight text-indigo-900 font-sans">Petty Cash Koperasi</span>
+          </div>
+          <div className="mt-3 flex items-center gap-2 p-2 bg-emerald-50 rounded-xl border border-emerald-100">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+            <span className="text-[10px] font-bold text-emerald-800 tracking-wider uppercase font-mono">Google Cloud On</span>
           </div>
         </div>
 
@@ -411,6 +570,75 @@ export default function App() {
         </header>
 
         <div className="p-8 max-w-6xl mx-auto space-y-8">
+          {/* Cloud Migration Sync Banner */}
+          <AnimatePresence>
+            {showMigrationBanner && (
+              <motion.div
+                initial={{ opacity: 0, y: -15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="bg-indigo-50 border border-indigo-150 rounded-2xl p-5 shadow-sm relative overflow-hidden"
+              >
+                <div className="absolute right-0 bottom-0 translate-x-10 translate-y-10 opacity-[0.03] pointer-events-none">
+                  <Database className="w-48 h-48 text-indigo-950" />
+                </div>
+                
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+                  <div className="flex items-start gap-3.5">
+                    <div className="p-2.5 bg-indigo-600/10 rounded-xl text-indigo-600 shrink-0 mt-0.5">
+                      <CloudUpload className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-800 text-sm">Pindahkan Data ke Cloud Koperasi Garuda</h4>
+                      <p className="text-slate-500 text-xs mt-0.5 leading-relaxed max-w-2xl">
+                        Kami mendeteksi data transaksi lokal tersimpan di browser Anda. Pindahkan data ini ke Google Cloud Firestore secara otomatis agar bisa diakses oleh komputer, HP, dan pengurus Koperasi lainnya secara real-time.
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="shrink-0 flex items-center gap-2 self-end md:self-center">
+                    {migrationStatus === 'idle' && (
+                      <button
+                        onClick={handleMigration}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs transition-all active:scale-95 shadow-lg shadow-indigo-100 inline-flex items-center gap-2 scale-100 hover:scale-[1.02]"
+                      >
+                        <CloudUpload className="w-3.5 h-3.5" />
+                        Migrasikan Sekarang
+                      </button>
+                    )}
+                    {migrationStatus === 'running' && (
+                      <span className="px-4 py-2 bg-indigo-100 text-indigo-700 font-bold rounded-xl text-xs inline-flex items-center gap-2">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Memproses Migrasi...
+                      </span>
+                    )}
+                    {migrationStatus === 'done' && (
+                      <span className="px-4 py-1.5 bg-emerald-100 text-emerald-800 font-bold rounded-xl text-xs inline-flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 animate-bounce text-emerald-600" />
+                        Migrasi Berhasil!
+                      </span>
+                    )}
+                    {migrationStatus === 'error' && (
+                      <button
+                        onClick={handleMigration}
+                        className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs transition-all"
+                      >
+                        Gagal, Coba Lagi
+                      </button>
+                    )}
+                    
+                    <button
+                      onClick={() => setShowMigrationBanner(false)}
+                      className="p-1 px-2 text-slate-400 hover:text-slate-650 rounded-lg hover:bg-indigo-100/40 text-xs font-semibold"
+                    >
+                      Batal
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {activeTab === 'dashboard' && (
             <>
               {/* Stats Grid */}
