@@ -40,28 +40,6 @@ import {
   Pie
 } from 'recharts';
 
-const GarudaLogo = ({ className = "w-12 h-12" }: { className?: string }) => {
-  return (
-    <svg 
-      className={className} 
-      viewBox="0 0 100 100" 
-      fill="none" 
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      {/* Left Wing (Red) */}
-      <path d="M50,40 L15,15 L25.5,37 L15,42.5 L30,53 L20,60 L45,70 Z" fill="#E11D48" />
-      {/* Right Wing (Red) */}
-      <path d="M50,40 L85,15 L74.5,37 L85,42.5 L70,53 L80,60 L55,70 Z" fill="#E11D48" />
-      {/* Golden Head/Beak */}
-      <path d="M50,11 L62,34 L50,38 L38,34 Z" fill="#FBBF24" />
-      {/* Body Structure (White/Silver with outer lines) */}
-      <path d="M50,38 L58,74 L50,88 L42,74 Z" fill="#F8FAFC" stroke="#CBD5E1" strokeWidth="1.5" />
-      {/* Golden Symmetrical Tail Details */}
-      <path d="M50,66 L55,81 L50,86 L45,81 Z" fill="#FBBF24" />
-    </svg>
-  );
-};
-
 const DEFAULT_CATEGORIES: Category[] = [
   { id: '1', name: 'Makanan & Minuman', color: '#3b82f6' },
   { id: '2', name: 'Transportasi', color: '#10b981' },
@@ -414,8 +392,8 @@ export default function App() {
         <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="bg-white/5 backdrop-blur-xl p-8 md:p-12 rounded-3xl border border-white/10 shadow-2xl max-w-md w-full text-center relative z-10">
-          <div className="w-16 h-16 bg-gradient-to-br from-rose-500 to-amber-500 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-rose-950/40 border border-white/20">
-            <GarudaLogo className="w-11 h-11 text-white" />
+          <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl shadow-indigo-950/50">
+            <BarChart3 className="w-8 h-8 text-white animate-pulse" />
           </div>
           
           <h2 className="text-2xl font-black text-white tracking-tight mb-2">
@@ -439,14 +417,9 @@ export default function App() {
             <span>Masuk dengan Google</span>
           </button>
         </div>
-        <a 
-          href="https://id.pngtree.com/free-png-vectors/logo-garuda" 
-          target="_blank" 
-          rel="noopener noreferrer" 
-          className="mt-8 text-slate-500 hover:text-rose-400 text-[10px] font-medium tracking-wide transition-colors cursor-pointer"
-        >
-          Logo Garuda Vector diilhami &amp; dirujuk via PNGTree
-        </a>
+        <p className="mt-8 text-slate-500 text-xs font-medium tracking-wide">
+          Protected by Firebase Enterprise Decent Security
+        </p>
       </div>
     );
   }
@@ -456,11 +429,11 @@ export default function App() {
       {/* Sidebar */}
       <aside className="w-64 bg-white border-r border-slate-200 hidden md:flex flex-col sticky top-0 h-screen">
         <div className="p-6">
-          <div className="flex items-center gap-3 text-rose-600 mb-1">
-            <div className="w-8 h-8 bg-gradient-to-br from-rose-500 to-rose-700 rounded-lg flex items-center justify-center shadow-sm shadow-rose-500/20">
-              <GarudaLogo className="w-5.5 h-5.5 text-white" />
+          <div className="flex items-center gap-3 text-indigo-600 mb-1">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+              <BarChart3 className="w-5 h-5 text-white" />
             </div>
-            <span className="font-bold text-xl tracking-tight text-slate-800">Petty Cash Koperasi</span>
+            <span className="font-bold text-xl tracking-tight text-indigo-900">Petty Cash Koperasi</span>
           </div>
         </div>
 
