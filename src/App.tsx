@@ -356,9 +356,19 @@ export default function App() {
     }
   };
 
+  // Helper to check if a transaction belongs to Koperasi category ('kas' or 'pemindahan kas')
+  const isKoperasiCategory = React.useCallback((t: Transaction) => {
+    if (t.categoryId === 'transfer_cat') return true;
+    const category = categories.find(c => c.id === t.categoryId);
+    const catName = category ? category.name.toLowerCase() : '';
+    return catName.includes('kas');
+  }, [categories]);
+
   // Calculations
   const getAccountBalance = (accId: string) => {
     return transactions.reduce((acc, t) => {
+      if (accId === 'acc_1' && !isKoperasiCategory(t)) return acc;
+
       const isFromCurrent = 
         t.accountId === accId || 
         (accId === 'acc_1' && (t.accountId === '1' || !t.accountId)) ||
@@ -421,7 +431,9 @@ export default function App() {
         (t.type === 'transfer' && isFromCurrent);
     }
     
-    return dateMatch && accountMatch;
+    const categoryMatch = activeAccountId === 'acc_1' ? isKoperasiCategory(t) : true;
+    
+    return dateMatch && accountMatch && categoryMatch;
   });
 
   const filteredTransactionsTab = React.useMemo(() => {
@@ -453,6 +465,8 @@ export default function App() {
   });
 
   const monthIncome = monthTransactions.reduce((acc, t) => {
+    if (activeAccountId === 'acc_1' && !isKoperasiCategory(t)) return acc;
+
     const isFromCurrent = 
       activeAccountId === 'all' ||
       t.accountId === activeAccountId || 
@@ -471,6 +485,8 @@ export default function App() {
   }, 0);
 
   const monthExpense = monthTransactions.reduce((acc, t) => {
+    if (activeAccountId === 'acc_1' && !isKoperasiCategory(t)) return acc;
+
     const isFromCurrent = 
       activeAccountId === 'all' ||
       t.accountId === activeAccountId || 
