@@ -1005,6 +1005,16 @@ function TransactionRow({
   const fromAcc = accounts.find(a => a.id === transaction.accountId);
   const toAcc = accounts.find(a => a.id === transaction.toAccountId);
 
+  const isFromCurrent = 
+    transaction.accountId === activeAccountId || 
+    (activeAccountId === 'acc_1' && (transaction.accountId === '1' || !transaction.accountId)) ||
+    (activeAccountId === 'acc_2' && transaction.accountId === '2');
+
+  const isToCurrent = 
+    transaction.toAccountId === activeAccountId ||
+    (activeAccountId === 'acc_1' && transaction.toAccountId === '1') ||
+    (activeAccountId === 'acc_2' && transaction.toAccountId === '2');
+
   const isTransfer = transaction.type === 'transfer';
   let amountSign = '';
   let amountColor = '';
@@ -1019,10 +1029,10 @@ function TransactionRow({
     if (activeAccountId === 'all') {
       amountSign = '⇄';
       amountColor = 'text-indigo-600';
-    } else if (transaction.toAccountId === activeAccountId) {
+    } else if (isToCurrent) {
       amountSign = '+';
       amountColor = 'text-emerald-600';
-    } else if (transaction.accountId === activeAccountId) {
+    } else if (isFromCurrent) {
       amountSign = '-';
       amountColor = 'text-rose-600';
     } else {
