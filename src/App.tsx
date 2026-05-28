@@ -356,19 +356,9 @@ export default function App() {
     }
   };
 
-  // Helper to check if a transaction belongs to Koperasi category ('kas' or 'pemindahan kas')
-  const isKoperasiCategory = React.useCallback((t: Transaction) => {
-    if (t.categoryId === 'transfer_cat') return true;
-    const category = categories.find(c => c.id === t.categoryId);
-    const catName = category ? category.name.toLowerCase() : '';
-    return catName.includes('kas');
-  }, [categories]);
-
   // Calculations
   const getAccountBalance = (accId: string) => {
     return transactions.reduce((acc, t) => {
-      if (accId === 'acc_1' && !isKoperasiCategory(t)) return acc;
-
       const isFromCurrent = 
         t.accountId === accId || 
         (accId === 'acc_1' && (t.accountId === '1' || !t.accountId)) ||
@@ -431,9 +421,7 @@ export default function App() {
         (t.type === 'transfer' && isFromCurrent);
     }
     
-    const categoryMatch = activeAccountId === 'acc_1' ? isKoperasiCategory(t) : true;
-    
-    return dateMatch && accountMatch && categoryMatch;
+    return dateMatch && accountMatch;
   });
 
   const filteredTransactionsTab = React.useMemo(() => {
@@ -465,8 +453,6 @@ export default function App() {
   });
 
   const monthIncome = monthTransactions.reduce((acc, t) => {
-    if (activeAccountId === 'acc_1' && !isKoperasiCategory(t)) return acc;
-
     const isFromCurrent = 
       activeAccountId === 'all' ||
       t.accountId === activeAccountId || 
@@ -485,8 +471,6 @@ export default function App() {
   }, 0);
 
   const monthExpense = monthTransactions.reduce((acc, t) => {
-    if (activeAccountId === 'acc_1' && !isKoperasiCategory(t)) return acc;
-
     const isFromCurrent = 
       activeAccountId === 'all' ||
       t.accountId === activeAccountId || 
@@ -1021,16 +1005,6 @@ function TransactionRow({
   const fromAcc = accounts.find(a => a.id === transaction.accountId);
   const toAcc = accounts.find(a => a.id === transaction.toAccountId);
 
-  const isFromCurrent = 
-    transaction.accountId === activeAccountId || 
-    (activeAccountId === 'acc_1' && (transaction.accountId === '1' || !transaction.accountId)) ||
-    (activeAccountId === 'acc_2' && transaction.accountId === '2');
-
-  const isToCurrent = 
-    transaction.toAccountId === activeAccountId ||
-    (activeAccountId === 'acc_1' && transaction.toAccountId === '1') ||
-    (activeAccountId === 'acc_2' && transaction.toAccountId === '2');
-
   const isTransfer = transaction.type === 'transfer';
   let amountSign = '';
   let amountColor = '';
@@ -1045,10 +1019,10 @@ function TransactionRow({
     if (activeAccountId === 'all') {
       amountSign = '⇄';
       amountColor = 'text-indigo-600';
-    } else if (isToCurrent) {
+    } else if (transaction.toAccountId === activeAccountId) {
       amountSign = '+';
       amountColor = 'text-emerald-600';
-    } else if (isFromCurrent) {
+    } else if (transaction.accountId === activeAccountId) {
       amountSign = '-';
       amountColor = 'text-rose-600';
     } else {
