@@ -646,38 +646,38 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto">
-        <header className="h-16 bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-10 shrink-0">
-          <div className="flex items-center gap-6">
+        <header className="relative h-16 bg-white border-b border-slate-200 px-8 flex items-center justify-between sticky top-0 z-10 shrink-0">
+          <div>
             <h1 className="text-lg font-bold text-slate-800 tracking-tight">
               {activeTab === 'dashboard' ? "Dashboard Petty Cash" : activeTab}
             </h1>
-            
-            {activeTab === 'dashboard' && (
-              <div className="flex bg-slate-100 p-1 rounded-lg">
+          </div>
+          
+          {activeTab === 'dashboard' && (
+            <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 flex bg-slate-100 p-1 rounded-lg border border-slate-200/40 shadow-xs">
+              <button 
+                onClick={() => setActiveAccountId('all')}
+                className={cn(
+                  "px-4 py-1.5 text-xs font-bold rounded-md transition-all",
+                  activeAccountId === 'all' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"
+                )}
+              >
+                Semua
+              </button>
+              {accounts.map(acc => (
                 <button 
-                  onClick={() => setActiveAccountId('all')}
+                  key={acc.id}
+                  onClick={() => setActiveAccountId(acc.id)}
                   className={cn(
-                    "px-3 py-1 text-xs font-bold rounded-md transition-all",
-                    activeAccountId === 'all' ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                    "px-4 py-1.5 text-xs font-bold rounded-md transition-all ml-1",
+                    activeAccountId === acc.id ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"
                   )}
                 >
-                  Semua
+                  {acc.name}
                 </button>
-                {accounts.map(acc => (
-                  <button 
-                    key={acc.id}
-                    onClick={() => setActiveAccountId(acc.id)}
-                    className={cn(
-                      "px-3 py-1 text-xs font-bold rounded-md transition-all ml-1",
-                      activeAccountId === acc.id ? "bg-white text-indigo-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                    )}
-                  >
-                    {acc.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+              ))}
+            </div>
+          )}
 
           <div className="flex items-center gap-3">
             {activeTab === 'dashboard' && (
