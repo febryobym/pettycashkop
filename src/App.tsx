@@ -41,7 +41,11 @@ import {
   Legend,
   Cell,
   PieChart,
-  Pie
+  Pie,
+  LineChart,
+  Line,
+  AreaChart,
+  Area
 } from 'recharts';
 
 const DEFAULT_CATEGORIES: Category[] = [
@@ -1474,6 +1478,124 @@ function ReportsView({ transactions, categories }: { transactions: Transaction[]
     return expenseByCategoryData.reduce((acc, curr) => acc + curr.value, 0);
   }, [expenseByCategoryData]);
 
+  const [selectedCatId, setSelectedCatId] = React.useState<string>('all');
+
+  // Group by month and calculate spending per category
+  const categoryTrends = React.useMemo(() => {
+    const monthsSet = new Set<string>();
+    transactions.forEach(t => {
+      if (t.date) {
+        monthsSet.add(format(safeParseISO(t.date), 'yyyy-MM'));
+      }
+    });
+
+    const sortedMonths = Array.from(monthsSet).sort();
+    if (sortedMonths.length === 0) {
+      sortedMonths.push(format(new Date(), 'yyyy-MM'));
+    }
+
+    // Capture the last 12 months for richer reports
+    const targetMonths = sortedMonths.slice(-12);
+
+    return targetMonths.map(monthKey => {
+      const monthLabel = format(safeParseISO(`${monthKey}-01`), 'MMM yyyy');
+      
+      const catTotals: Record<string, number> = {};
+      categories.forEach(c => {
+        catTotals[c.id] = 0;
+      });
+
+      let totalExpenseInMonth = 0;
+
+      transactions.forEach(t => {
+        if (t.type === 'expense') {
+          const tMonthKey = format(safeParseISO(t.date), 'yyyy-MM');
+          if (tMonthKey === monthKey) {
+            if (t.categoryId) {
+              catTotals[t.categoryId] = (catTotals[t.categoryId] || 0) + t.amount;
+            }
+            totalExpenseInMonth += t.amount;
+          }
+        }
+      });
+
+      return {
+        month: monthLabel,
+        monthKey,
+        total: totalExpenseInMonth,
+        ...catTotals
+      };
+    });
+  }, [transactions, categories]);
+
+  // Aggregate stats for the selected category
+  const categoryStats = React.useMemo(() => {
+    if (selectedCatId === 'all') {
+      let totalSpent = 0;
+      const monthTotals: Record<string, number> = {};
+      
+      transactions.forEach(t => {
+        if (t.type === 'expense') {
+          totalSpent += t.amount;
+          const mKey = format(safeParseISO(t.date), 'yyyy-MM');
+          monthTotals[mKey] = (monthTotals[mKey] || 0) + t.amount;
+        }
+      });
+
+      const monthsCount = Object.keys(monthTotals).length || 1;
+      const averageMonthly = totalSpent / monthsCount;
+      
+      let peakMonthLabel = '-';
+      let peakMonthValue = 0;
+      Object.entries(monthTotals).forEach(([mKey, val]) => {
+        if (val > peakMonthValue) {
+          peakMonthValue = val;
+          peakMonthLabel = format(safeParseISO(`${mKey}-01`), 'MMMM yyyy');
+        }
+      });
+
+      return {
+        totalSpent,
+        averageMonthly,
+        peakMonthLabel,
+        peakMonthValue,
+        categoryName: 'Semua Kategori'
+      };
+    } else {
+      const targetCategory = categories.find(c => c.id === selectedCatId);
+      let totalSpent = 0;
+      const monthTotals: Record<string, number> = {};
+      
+      transactions.forEach(t => {
+        if (t.type === 'expense' && t.categoryId === selectedCatId) {
+          totalSpent += t.amount;
+          const mKey = format(safeParseISO(t.date), 'yyyy-MM');
+          monthTotals[mKey] = (monthTotals[mKey] || 0) + t.amount;
+        }
+      });
+
+      const monthsCount = Object.keys(monthTotals).length || 1;
+      const averageMonthly = totalSpent / monthsCount;
+      
+      let peakMonthLabel = '-';
+      let peakMonthValue = 0;
+      Object.entries(monthTotals).forEach(([mKey, val]) => {
+        if (val > peakMonthValue) {
+          peakMonthValue = val;
+          peakMonthLabel = format(safeParseISO(`${mKey}-01`), 'MMMM yyyy');
+        }
+      });
+
+      return {
+        totalSpent,
+        averageMonthly,
+        peakMonthLabel,
+        peakMonthValue,
+        categoryName: targetCategory?.name || 'Kategori'
+      };
+    }
+  }, [transactions, categories, selectedCatId]);
+
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1553,6 +1675,142 @@ function ReportsView({ transactions, categories }: { transactions: Transaction[]
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      </div>
+
+      {/* Analisis Bulanan Per Kategori */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800">Analisis Kategori Bulanan</h3>
+            <p className="text-xs text-slate-500 mt-0.5">Pantau tren dan perbandingan pengeluaran bulanan untuk masing-masing kategori</p>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => setSelectedCatId('all')}
+              className={cn(
+                "px-3 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer",
+                selectedCatId === 'all'
+                  ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                  : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+              )}
+            >
+              Semua Kategori
+            </button>
+            {categories.map(cat => (
+              <button
+                key={cat.id}
+                onClick={() => setSelectedCatId(cat.id)}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5",
+                  selectedCatId === cat.id
+                    ? "text-white shadow-sm"
+                    : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                )}
+                style={{
+                  backgroundColor: selectedCatId === cat.id ? cat.color : undefined,
+                  borderColor: selectedCatId === cat.id ? cat.color : undefined,
+                }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                {cat.name}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Chart Wrapper */}
+          <div className="lg:col-span-8">
+            <div className="h-80 w-full">
+              {categoryTrends.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                  <span className="text-sm font-medium">Belum ada data transaksi</span>
+                </div>
+              ) : selectedCatId === 'all' ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={categoryTrends}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="month" axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} dy={10} />
+                    <YAxis axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} tickFormatter={(v) => `${v/1000}k`} />
+                    <Tooltip 
+                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', padding: '12px' }}
+                      formatter={(v: number, name: string) => {
+                        const cat = categories.find(c => c.id === name);
+                        return [formatCurrency(v), cat ? cat.name : name];
+                      }}
+                    />
+                    <Legend verticalAlign="top" align="right" iconType="circle" wrapperStyle={{ fontSize: '10px', paddingBottom: '10px' }} />
+                    {categories.map(cat => (
+                      <Bar 
+                        key={cat.id} 
+                        dataKey={cat.id} 
+                        name={cat.name} 
+                        fill={cat.color} 
+                        stackId="a" 
+                        radius={[2, 2, 0, 0]} 
+                      />
+                    ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={categoryTrends}>
+                    <defs>
+                      <linearGradient id={`colorGrad-${selectedCatId}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={categories.find(c => c.id === selectedCatId)?.color || '#6366f1'} stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor={categories.find(c => c.id === selectedCatId)?.color || '#6366f1'} stopOpacity={0.0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="month" axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} dy={10} />
+                    <YAxis axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} tickFormatter={(v) => `${v/1000}k`} />
+                    <Tooltip 
+                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', padding: '12px' }}
+                      formatter={(v: number) => [formatCurrency(v), categories.find(c => c.id === selectedCatId)?.name || 'Jumlah']}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey={selectedCatId} 
+                      stroke={categories.find(c => c.id === selectedCatId)?.color || '#6366f1'} 
+                      strokeWidth={3}
+                      fillOpacity={1} 
+                      fill={`url(#colorGrad-${selectedCatId})`} 
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+
+          {/* Stats Summary Sidebar */}
+          <div className="lg:col-span-4 flex flex-col justify-between space-y-4 bg-slate-50 p-5 rounded-xl border border-slate-100">
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Ringkasan Tren</span>
+              <h4 className="text-sm font-extrabold text-slate-800 mt-0.5">{categoryStats.categoryName}</h4>
+            </div>
+
+            <div className="space-y-3 flex-1 flex flex-col justify-center">
+              <div className="bg-white p-3 rounded-lg border border-slate-200/50 shadow-xs">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Total Pengeluaran</p>
+                <p className="text-base font-extrabold text-slate-800 mt-0.5">{formatCurrency(categoryStats.totalSpent)}</p>
+              </div>
+
+              <div className="bg-white p-3 rounded-lg border border-slate-200/50 shadow-xs">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Rata-rata Pengeluaran</p>
+                <p className="text-base font-extrabold text-indigo-700 mt-0.5">{formatCurrency(categoryStats.averageMonthly)}</p>
+              </div>
+
+              <div className="bg-white p-3 rounded-lg border border-slate-200/50 shadow-xs">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Bulan Terboros</p>
+                <p className="text-xs font-bold text-slate-800 mt-0.5 truncate">{categoryStats.peakMonthLabel}</p>
+                {categoryStats.peakMonthValue > 0 && (
+                  <p className="text-[10px] font-semibold text-rose-600">({formatCurrency(categoryStats.peakMonthValue)})</p>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
