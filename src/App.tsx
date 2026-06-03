@@ -63,6 +63,7 @@ const DEFAULT_CATEGORIES: Category[] = [
 const DEFAULT_ACCOUNTS: Account[] = [
   { id: 'acc_1', name: 'Petty Cash Koperasi', description: 'Kas operasional harian' },
   { id: 'acc_2', name: 'Margin Mas Aris', description: 'Dana masuk dari Mas Aris' },
+  { id: 'acc_4', name: 'Cash Koperasi', description: 'Kas Koperasi Utama' },
 ];
 
 const safeParseISO = (dateStr: any): Date => {
@@ -159,6 +160,7 @@ export default function App() {
       const list: Account[] = [];
       let hasRekeningLala = false;
       let oldMasArisDocData: any = null;
+      let hasCashKoperasi = false;
       snapshot.forEach((docSnap) => {
         if (docSnap.id === 'acc_3') {
           hasRekeningLala = true;
@@ -166,6 +168,9 @@ export default function App() {
           const data = docSnap.data();
           if (docSnap.id === 'acc_2' && data.name === 'Transfer dari Mas Aris') {
             oldMasArisDocData = data;
+          }
+          if (docSnap.id === 'acc_4') {
+            hasCashKoperasi = true;
           }
           list.push({ id: docSnap.id, ...data } as Account);
         }
@@ -185,6 +190,13 @@ export default function App() {
         });
       }
 
+      if (!hasCashKoperasi && snapshot.size > 0) {
+        // Automatically seed 'Cash Koperasi' (acc_4) if it doesn't exist yet
+        setDoc(doc(db, 'accounts', 'acc_4'), { name: 'Cash Koperasi', description: 'Kas Koperasi Utama' }).catch((err) => {
+          console.error("Gagal menambahkan acc_4 di Firestore:", err);
+        });
+      }
+
       if (list.length > 0) {
         // Map the loaded list locally too in case the database update hasn't propagated back yet
         const mappedList = list.map(acc => {
@@ -193,6 +205,13 @@ export default function App() {
           }
           return acc;
         });
+
+        // Ensure acc_4 is in mappedList locally if it has not propagated from Firestore yet
+        const existsLocally = mappedList.some(acc => acc.id === 'acc_4');
+        if (!existsLocally) {
+          mappedList.push({ id: 'acc_4', name: 'Cash Koperasi', description: 'Kas Koperasi Utama' });
+        }
+
         setAccounts(mappedList);
       } else {
         // Seed standard default accounts if Firestore is completely fresh
