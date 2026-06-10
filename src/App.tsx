@@ -911,7 +911,7 @@ export default function App() {
           )}
 
           {activeTab === 'reports' && (
-            <ReportsView transactions={transactions} categories={categories} />
+            <ReportsView transactions={transactions} categories={categories} accounts={accounts} />
           )}
         </div>
       </main>
@@ -1447,27 +1447,73 @@ function TransactionModal({ categories, accounts, onClose, onSubmit, initialData
   );
 }
 
-function ReportsView({ transactions, categories }: { transactions: Transaction[], categories: Category[] }) {
-  // Group by month
+function ReportsView({ transactions, categories, accounts }: { transactions: Transaction[], categories: Category[], accounts: Account[] }) {
+  // Group by month with individual account cumulative balances
   const monthlyData = React.useMemo(() => {
-    const summary: Record<string, { income: number, expense: number }> = {};
+    const summary: Record<string, { income: number, expense: number, targetMonthKey: string }> = {};
     
     transactions.forEach(t => {
       const monthKey = format(safeParseISO(t.date), 'yyyy-MM');
-      if (!summary[monthKey]) summary[monthKey] = { income: 0, expense: 0 };
+      if (!summary[monthKey]) {
+        summary[monthKey] = { income: 0, expense: 0, targetMonthKey: monthKey };
+      }
       if (t.type === 'income') summary[monthKey].income += t.amount;
       else if (t.type === 'expense') summary[monthKey].expense += t.amount;
     });
 
     return Object.entries(summary)
-      .map(([month, data]) => ({
-        month: format(safeParseISO(`${month}-01`), 'MMM yyyy'),
-        income: data.income,
-        expense: data.expense,
-        balance: data.income - data.expense
-      }))
-      .sort((a, b) => b.month.localeCompare(a.month));
-  }, [transactions]);
+      .map(([month, data]) => {
+        const monthKey = data.targetMonthKey;
+        
+        // Calculate ending balance for each account up to this month
+        const accountBalances: Record<string, number> = {};
+        accounts.forEach(acc => {
+          accountBalances[acc.id] = transactions.reduce((balanceAcc, t) => {
+            const tMonthKey = format(safeParseISO(t.date), 'yyyy-MM');
+            if (tMonthKey > monthKey) return balanceAcc; // ignore transactions in future months
+            
+            const isFromCurrent = 
+              t.accountId === acc.id || 
+              (acc.id === 'acc_1' && (t.accountId === '1' || !t.accountId)) ||
+              (acc.id === 'acc_2' && t.accountId === '2');
+
+            const isToCurrent = 
+              t.toAccountId === acc.id ||
+              (acc.id === 'acc_1' && t.toAccountId === '1') ||
+              (acc.id === 'acc_2' && t.toAccountId === '2');
+
+            if (isFromCurrent) {
+              if (t.type === 'income') return balanceAcc + t.amount;
+              if (t.type === 'expense') return balanceAcc - t.amount;
+              if (t.type === 'transfer') return balanceAcc - t.amount;
+            }
+            if (t.type === 'transfer' && isToCurrent) {
+              return balanceAcc + t.amount;
+            }
+            return balanceAcc;
+          }, 0);
+        });
+
+        // Calculate total balance up to this month (cumulative sum of income - expense up to this month)
+        const totalCumulativeBalance = transactions.reduce((accBalance, t) => {
+          const tMonthKey = format(safeParseISO(t.date), 'yyyy-MM');
+          if (tMonthKey > monthKey) return accBalance;
+          if (t.type === 'income') return accBalance + t.amount;
+          if (t.type === 'expense') return accBalance - t.amount;
+          return accBalance;
+        }, 0);
+
+        return {
+          month: format(safeParseISO(`${month}-01`), 'MMM yyyy'),
+          monthKey,
+          income: data.income,
+          expense: data.expense,
+          accountBalances,
+          totalCumulativeBalance
+        };
+      })
+      .sort((a, b) => b.monthKey.localeCompare(a.monthKey));
+  }, [transactions, accounts]);
 
   // Group by category for expenses
   const expenseByCategoryData = React.useMemo(() => {
@@ -1834,14 +1880,22 @@ function ReportsView({ transactions, categories }: { transactions: Transaction[]
         </div>
       </div>
 
-      <div className="bg-white overflow-hidden rounded-2xl border border-slate-200 shadow-sm">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-slate-50 border-b border-slate-100">
+      <div className="bg-white overflow-x-auto rounded-2xl border border-slate-200 shadow-sm">
+        <table className="w-full text-left text-sm min-w-[700px]">
+          <thead className="bg-slate-50 border-b border-slate-150 text-slate-500 font-bold uppercase text-[10px] tracking-wider">
             <tr>
-              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Bulan</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Pemasukan</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Pengeluaran</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">Saldo Akhir</th>
+              <th rowSpan={2} className="px-6 py-4 border-r border-slate-200/50 align-middle">Bulan</th>
+              <th rowSpan={2} className="px-6 py-4 border-r border-slate-200/50 align-middle">Pemasukan</th>
+              <th rowSpan={2} className="px-6 py-4 border-r border-slate-200/50 align-middle">Pengeluaran</th>
+              <th colSpan={accounts.length} className="px-4 py-2 border-r border-slate-200/50 text-center bg-indigo-50/40 text-indigo-700 font-extrabold">Saldo Per Rekening/Akun</th>
+              <th rowSpan={2} className="px-6 py-4 text-right align-middle text-indigo-900 font-extrabold">Total Saldo Akhir</th>
+            </tr>
+            <tr className="bg-slate-50/80 border-b border-slate-100">
+              {accounts.map(acc => (
+                <th key={acc.id} className="px-4 py-2 border-r border-slate-200/50 font-semibold text-slate-500 normal-case text-[11px]">
+                  {acc.name}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -1850,7 +1904,14 @@ function ReportsView({ transactions, categories }: { transactions: Transaction[]
                 <td className="px-6 py-4 font-semibold text-slate-700">{row.month}</td>
                 <td className="px-6 py-4 text-emerald-600 font-medium">{formatCurrency(row.income)}</td>
                 <td className="px-6 py-4 text-rose-600 font-medium">{formatCurrency(row.expense)}</td>
-                <td className="px-6 py-4 text-right font-bold text-slate-900">{formatCurrency(row.balance)}</td>
+                {accounts.map(acc => (
+                  <td key={acc.id} className="px-4 py-4 border-l border-slate-150/40 text-slate-600 font-semibold text-xs">
+                    {formatCurrency(row.accountBalances[acc.id] || 0)}
+                  </td>
+                ))}
+                <td className="px-6 py-4 text-right font-black text-indigo-900 bg-indigo-50/10">
+                  {formatCurrency(row.totalCumulativeBalance)}
+                </td>
               </tr>
             ))}
           </tbody>
