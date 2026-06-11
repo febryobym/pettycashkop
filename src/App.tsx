@@ -380,6 +380,38 @@ export default function App() {
   };
 
   // Calculations
+  const getAccountBalanceAsOf = (accId: string, month: number, year: number) => {
+    return transactions.reduce((acc, t) => {
+      const date = safeParseISO(t.date);
+      const tYear = date.getFullYear();
+      const tMonth = date.getMonth();
+
+      // Only count transactions up to the selected month and year
+      if (tYear > year) return acc;
+      if (tYear === year && tMonth > month) return acc;
+
+      const isFromCurrent = 
+        t.accountId === accId || 
+        (accId === 'acc_1' && (t.accountId === '1' || !t.accountId)) ||
+        (accId === 'acc_2' && t.accountId === '2');
+
+      const isToCurrent = 
+        t.toAccountId === accId ||
+        (accId === 'acc_1' && t.toAccountId === '1') ||
+        (accId === 'acc_2' && t.toAccountId === '2');
+
+      if (isFromCurrent) {
+        if (t.type === 'income') return acc + t.amount;
+        if (t.type === 'expense') return acc - t.amount;
+        if (t.type === 'transfer') return acc - t.amount; // Transfer FROM
+      }
+      if (t.type === 'transfer' && isToCurrent) {
+        return acc + t.amount; // Transfer TO
+      }
+      return acc;
+    }, 0);
+  };
+
   const getAccountBalance = (accId: string) => {
     return transactions.reduce((acc, t) => {
       const isFromCurrent = 
@@ -406,11 +438,19 @@ export default function App() {
 
   const totalBalance = activeAccountId === 'all'
     ? transactions.reduce((acc, t) => {
+        const date = safeParseISO(t.date);
+        const tYear = date.getFullYear();
+        const tMonth = date.getMonth();
+
+        // Only count transactions up to the selected month and year
+        if (tYear > filterYear) return acc;
+        if (tYear === filterYear && tMonth > filterMonth) return acc;
+
         if (t.type === 'income') return acc + t.amount;
         if (t.type === 'expense') return acc - t.amount;
         return acc;
       }, 0)
-    : getAccountBalance(activeAccountId);
+    : getAccountBalanceAsOf(activeAccountId, filterMonth, filterYear);
   
   const years = React.useMemo(() => {
     const yearsSet = new Set<number>([new Date().getFullYear()]);
@@ -828,7 +868,7 @@ export default function App() {
                           </div>
                           <div>
                             <p className="text-xs font-bold text-slate-500 uppercase tracking-tight">{acc.name}</p>
-                            <p className="text-sm font-bold text-slate-900">{formatCurrency(getAccountBalance(acc.id))}</p>
+                            <p className="text-sm font-bold text-slate-900">{formatCurrency(getAccountBalanceAsOf(acc.id, filterMonth, filterYear))}</p>
                           </div>
                         </div>
                       </div>
