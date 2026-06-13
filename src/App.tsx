@@ -1487,7 +1487,28 @@ function TransactionModal({ categories, accounts, onClose, onSubmit, initialData
   );
 }
 
+const INDONESIAN_MONTHS = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+];
+
 function ReportsView({ transactions, categories, accounts }: { transactions: Transaction[], categories: Category[], accounts: Account[] }) {
+  const [reportMonth, setReportMonth] = React.useState<number | 'all'>('all');
+  const [reportYear, setReportYear] = React.useState<number | 'all'>('all');
+
+  const availableYears = React.useMemo(() => {
+    const yearsSet = new Set<number>();
+    transactions.forEach(t => {
+      if (t.date) {
+        yearsSet.add(safeParseISO(t.date).getFullYear());
+      }
+    });
+    if (yearsSet.size === 0) {
+      yearsSet.add(new Date().getFullYear());
+    }
+    return Array.from(yearsSet).sort((a, b) => b - a);
+  }, [transactions]);
+
   // Group by month with individual account cumulative balances
   const monthlyData = React.useMemo(() => {
     const summary: Record<string, { income: number, expense: number, targetMonthKey: string }> = {};
@@ -1585,121 +1606,225 @@ function ReportsView({ transactions, categories, accounts }: { transactions: Tra
 
   const [selectedCatId, setSelectedCatId] = React.useState<string>('all');
 
-  // Group by month and calculate spending per category
+  // Group by month/day and calculate spending per category
   const categoryTrends = React.useMemo(() => {
-    const monthsSet = new Set<string>();
-    transactions.forEach(t => {
-      if (t.date) {
-        monthsSet.add(format(safeParseISO(t.date), 'yyyy-MM'));
-      }
-    });
-
-    const sortedMonths = Array.from(monthsSet).sort();
-    if (sortedMonths.length === 0) {
-      sortedMonths.push(format(new Date(), 'yyyy-MM'));
+    let targetYear = reportYear;
+    let targetMonth = reportMonth;
+    
+    // Auto fallback if year is not specified but month is
+    if (targetMonth !== 'all' && targetYear === 'all') {
+      targetYear = availableYears[0] || new Date().getFullYear();
     }
 
-    // Capture the last 12 months for richer reports
-    const targetMonths = sortedMonths.slice(-12);
-
-    return targetMonths.map(monthKey => {
-      const monthLabel = format(safeParseISO(`${monthKey}-01`), 'MMM yyyy');
-      
-      const catTotals: Record<string, number> = {};
-      categories.forEach(c => {
-        catTotals[c.id] = 0;
-      });
-
-      let totalExpenseInMonth = 0;
-
+    if (targetYear === 'all') {
+      // 1. ALL TIME (Monthly Trend of Last 12 Months)
+      const monthsSet = new Set<string>();
       transactions.forEach(t => {
-        if (t.type === 'expense') {
-          const tMonthKey = format(safeParseISO(t.date), 'yyyy-MM');
-          if (tMonthKey === monthKey) {
-            if (t.categoryId) {
-              catTotals[t.categoryId] = (catTotals[t.categoryId] || 0) + t.amount;
-            }
-            totalExpenseInMonth += t.amount;
-          }
+        if (t.date) {
+          monthsSet.add(format(safeParseISO(t.date), 'yyyy-MM'));
         }
       });
 
-      return {
-        month: monthLabel,
-        monthKey,
-        total: totalExpenseInMonth,
-        ...catTotals
-      };
+      const sortedMonths = Array.from(monthsSet).sort();
+      if (sortedMonths.length === 0) {
+        sortedMonths.push(format(new Date(), 'yyyy-MM'));
+      }
+
+      // Capture the last 12 months for richer reports
+      const targetMonths = sortedMonths.slice(-12);
+
+      return targetMonths.map(monthKey => {
+        const monthLabel = format(safeParseISO(`${monthKey}-01`), 'MMM yyyy');
+        
+        const catTotals: Record<string, number> = {};
+        categories.forEach(c => {
+          catTotals[c.id] = 0;
+        });
+
+        let totalExpenseInMonth = 0;
+
+        transactions.forEach(t => {
+          if (t.type === 'expense') {
+            const tMonthKey = format(safeParseISO(t.date), 'yyyy-MM');
+            if (tMonthKey === monthKey) {
+              if (t.categoryId) {
+                catTotals[t.categoryId] = (catTotals[t.categoryId] || 0) + t.amount;
+              }
+              totalExpenseInMonth += t.amount;
+            }
+          }
+        });
+
+        return {
+          month: monthLabel,
+          monthKey,
+          total: totalExpenseInMonth,
+          ...catTotals
+        };
+      });
+    } else if (targetMonth === 'all') {
+      // 2. SPECIFIC YEAR, ALL MONTHS (Monthly Trend for that Year)
+      const monthsIndices = Array.from({ length: 12 }, (_, i) => i);
+      
+      return monthsIndices.map(monthIndex => {
+        const monthStr = String(monthIndex + 1).padStart(2, '0');
+        const monthKey = `${targetYear}-${monthStr}`;
+        const monthLabel = format(new Date(Number(targetYear), monthIndex, 1), 'MMM yyyy');
+        
+        const catTotals: Record<string, number> = {};
+        categories.forEach(c => {
+          catTotals[c.id] = 0;
+        });
+
+        let totalExpenseInMonth = 0;
+
+        transactions.forEach(t => {
+          if (t.type === 'expense') {
+            const tDate = safeParseISO(t.date);
+            if (tDate.getFullYear() === Number(targetYear) && tDate.getMonth() === monthIndex) {
+              if (t.categoryId) {
+                catTotals[t.categoryId] = (catTotals[t.categoryId] || 0) + t.amount;
+              }
+              totalExpenseInMonth += t.amount;
+            }
+          }
+        });
+
+        return {
+          month: monthLabel,
+          monthKey,
+          total: totalExpenseInMonth,
+          ...catTotals
+        };
+      });
+    } else {
+      // 3. SPECIFIC YEAR AND SPECIFIC MONTH (Daily Trend)
+      const numDays = new Date(Number(targetYear), Number(targetMonth) + 1, 0).getDate();
+      const daysArray = Array.from({ length: numDays }, (_, i) => i + 1);
+
+      return daysArray.map(dayNum => {
+        const dayLabel = `${dayNum} ${format(new Date(Number(targetYear), Number(targetMonth), 1), 'MMM')}`;
+
+        const catTotals: Record<string, number> = {};
+        categories.forEach(c => {
+          catTotals[c.id] = 0;
+        });
+
+        let totalExpenseInDay = 0;
+
+        transactions.forEach(t => {
+          if (t.type === 'expense') {
+            const tDate = safeParseISO(t.date);
+            if (tDate.getFullYear() === Number(targetYear) && tDate.getMonth() === Number(targetMonth) && tDate.getDate() === dayNum) {
+              if (t.categoryId) {
+                catTotals[t.categoryId] = (catTotals[t.categoryId] || 0) + t.amount;
+              }
+              totalExpenseInDay += t.amount;
+            }
+          }
+        });
+
+        return {
+          month: dayLabel,
+          day: dayNum,
+          total: totalExpenseInDay,
+          ...catTotals
+        };
+      });
+    }
+  }, [transactions, categories, reportYear, reportMonth, availableYears]);
+
+  // Filtered transactions based on month and year for card stats aggregation
+  const filteredTransactionsForStats = React.useMemo(() => {
+    let targetYear = reportYear;
+    let targetMonth = reportMonth;
+    
+    // Auto fallback if year is not specified but month is
+    if (targetMonth !== 'all' && targetYear === 'all') {
+      targetYear = availableYears[0] || new Date().getFullYear();
+    }
+
+    return transactions.filter(t => {
+      if (t.type !== 'expense') return false;
+      
+      const tDate = safeParseISO(t.date);
+      if (targetYear !== 'all' && tDate.getFullYear() !== Number(targetYear)) return false;
+      if (targetMonth !== 'all' && tDate.getMonth() !== Number(targetMonth)) return false;
+      
+      return true;
     });
-  }, [transactions, categories]);
+  }, [transactions, reportYear, reportMonth, availableYears]);
 
   // Aggregate stats for the selected category
   const categoryStats = React.useMemo(() => {
-    if (selectedCatId === 'all') {
-      let totalSpent = 0;
-      const monthTotals: Record<string, number> = {};
-      
-      transactions.forEach(t => {
-        if (t.type === 'expense') {
-          totalSpent += t.amount;
-          const mKey = format(safeParseISO(t.date), 'yyyy-MM');
-          monthTotals[mKey] = (monthTotals[mKey] || 0) + t.amount;
+    const isAllCats = selectedCatId === 'all';
+    const targetCategory = categories.find(c => c.id === selectedCatId);
+    
+    let totalSpent = 0;
+    const periodTotals: Record<string, number> = {};
+    
+    filteredTransactionsForStats.forEach(t => {
+      if (isAllCats || t.categoryId === selectedCatId) {
+        totalSpent += t.amount;
+        
+        let timeKey = '';
+        if (reportMonth !== 'all') {
+          timeKey = format(safeParseISO(t.date), 'dd MMM yyyy');
+        } else {
+          timeKey = format(safeParseISO(t.date), 'MMMM yyyy');
         }
-      });
+        periodTotals[timeKey] = (periodTotals[timeKey] || 0) + t.amount;
+      }
+    });
 
-      const monthsCount = Object.keys(monthTotals).length || 1;
-      const averageMonthly = totalSpent / monthsCount;
-      
-      let peakMonthLabel = '-';
-      let peakMonthValue = 0;
-      Object.entries(monthTotals).forEach(([mKey, val]) => {
-        if (val > peakMonthValue) {
-          peakMonthValue = val;
-          peakMonthLabel = format(safeParseISO(`${mKey}-01`), 'MMMM yyyy');
-        }
-      });
-
-      return {
-        totalSpent,
-        averageMonthly,
-        peakMonthLabel,
-        peakMonthValue,
-        categoryName: 'Semua Kategori'
-      };
+    let averageMonthlyValue = 0;
+    let monthsCount = 1;
+    if (reportYear === 'all') {
+      const uniqueMonths = new Set(filteredTransactionsForStats.map(t => format(safeParseISO(t.date), 'yyyy-MM')));
+      monthsCount = uniqueMonths.size || 1;
+      averageMonthlyValue = totalSpent / monthsCount;
+    } else if (reportMonth === 'all') {
+      averageMonthlyValue = totalSpent / 12;
     } else {
-      const targetCategory = categories.find(c => c.id === selectedCatId);
-      let totalSpent = 0;
-      const monthTotals: Record<string, number> = {};
-      
-      transactions.forEach(t => {
-        if (t.type === 'expense' && t.categoryId === selectedCatId) {
-          totalSpent += t.amount;
-          const mKey = format(safeParseISO(t.date), 'yyyy-MM');
-          monthTotals[mKey] = (monthTotals[mKey] || 0) + t.amount;
-        }
-      });
-
-      const monthsCount = Object.keys(monthTotals).length || 1;
-      const averageMonthly = totalSpent / monthsCount;
-      
-      let peakMonthLabel = '-';
-      let peakMonthValue = 0;
-      Object.entries(monthTotals).forEach(([mKey, val]) => {
-        if (val > peakMonthValue) {
-          peakMonthValue = val;
-          peakMonthLabel = format(safeParseISO(`${mKey}-01`), 'MMMM yyyy');
-        }
-      });
-
-      return {
-        totalSpent,
-        averageMonthly,
-        peakMonthLabel,
-        peakMonthValue,
-        categoryName: targetCategory?.name || 'Kategori'
-      };
+      averageMonthlyValue = totalSpent;
     }
-  }, [transactions, categories, selectedCatId]);
+
+    let averageDailyValue = 0;
+    let targetYear = reportYear;
+    let targetMonth = reportMonth;
+    if (targetMonth !== 'all' && targetYear === 'all') {
+      targetYear = availableYears[0] || new Date().getFullYear();
+    }
+
+    if (targetMonth !== 'all') {
+      const numDays = new Date(Number(targetYear), Number(targetMonth) + 1, 0).getDate();
+      averageDailyValue = totalSpent / numDays;
+    } else if (targetYear !== 'all') {
+      const isLeap = (y: number) => (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
+      const totalDays = isLeap(Number(targetYear)) ? 366 : 365;
+      averageDailyValue = totalSpent / totalDays;
+    } else {
+      let totalDays = 30;
+      if (filteredTransactionsForStats.length > 0) {
+        const dates = filteredTransactionsForStats.map(t => safeParseISO(t.date).getTime());
+        const minDate = Math.min(...dates);
+        const maxDate = Math.max(...dates);
+        const diffTime = Math.abs(maxDate - minDate);
+        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        totalDays = diffDays > 0 ? diffDays : 30;
+      } else {
+        totalDays = monthsCount * 30;
+      }
+      averageDailyValue = totalSpent / totalDays;
+    }
+
+    return {
+      totalSpent,
+      averageMonthlyValue,
+      averageDailyValue,
+      categoryName: isAllCats ? 'Semua Kategori' : (targetCategory?.name || 'Kategori')
+    };
+  }, [filteredTransactionsForStats, selectedCatId, categories, reportMonth, reportYear, availableYears]);
 
   return (
     <div className="space-y-8">
@@ -1786,138 +1911,181 @@ function ReportsView({ transactions, categories, accounts }: { transactions: Tra
 
       {/* Analisis Bulanan Per Kategori */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 border-b border-slate-100 pb-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-5">
           <div>
             <h3 className="text-lg font-bold text-slate-800">Analisis Kategori Bulanan</h3>
             <p className="text-xs text-slate-500 mt-0.5">Pantau tren dan perbandingan pengeluaran bulanan untuk masing-masing kategori</p>
           </div>
           
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              onClick={() => setSelectedCatId('all')}
-              className={cn(
-                "px-3 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer",
-                selectedCatId === 'all'
-                  ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
-                  : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-              )}
-            >
-              Semua Kategori
-            </button>
-            {categories.map(cat => (
-              <button
-                key={cat.id}
-                onClick={() => setSelectedCatId(cat.id)}
-                className={cn(
-                  "px-3 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5",
-                  selectedCatId === cat.id
-                    ? "text-white shadow-sm"
-                    : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
-                )}
-                style={{
-                  backgroundColor: selectedCatId === cat.id ? cat.color : undefined,
-                  borderColor: selectedCatId === cat.id ? cat.color : undefined,
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-slate-400">Bulan:</span>
+              <select
+                className="px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold text-slate-600 focus:ring-2 focus:ring-indigo-100 transition-all cursor-pointer"
+                value={reportMonth}
+                onChange={e => {
+                  const val = e.target.value === 'all' ? 'all' : Number(e.target.value);
+                  setReportMonth(val);
+                  if (val !== 'all' && reportYear === 'all') {
+                    setReportYear(availableYears[0] || new Date().getFullYear());
+                  }
                 }}
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                {cat.name}
-              </button>
-            ))}
+                <option value="all">Semua Bulan</option>
+                {INDONESIAN_MONTHS.map((name, idx) => (
+                  <option key={idx} value={idx}>{name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-slate-400">Tahun:</span>
+              <select
+                className="px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg outline-none font-bold text-slate-600 focus:ring-2 focus:ring-indigo-100 transition-all cursor-pointer"
+                value={reportYear}
+                onChange={e => {
+                  const val = e.target.value === 'all' ? 'all' : Number(e.target.value);
+                  setReportYear(val);
+                  if (val === 'all') {
+                    setReportMonth('all');
+                  }
+                }}
+              >
+                <option value="all">Semua Tahun</option>
+                {availableYears.map(yr => (
+                  <option key={yr} value={yr}>{yr}</option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Chart Wrapper */}
-          <div className="lg:col-span-8">
-            <div className="h-80 w-full">
-              {categoryTrends.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                  <span className="text-sm font-medium">Belum ada data transaksi</span>
-                </div>
-              ) : selectedCatId === 'all' ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={categoryTrends}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="month" axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} dy={10} />
-                    <YAxis axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} tickFormatter={(v) => `${v/1000}k`} />
-                    <Tooltip 
-                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', padding: '12px' }}
-                      formatter={(v: number, name: string) => {
-                        const cat = categories.find(c => c.id === name);
-                        return [formatCurrency(v), cat ? cat.name : name];
-                      }}
-                    />
-                    <Legend verticalAlign="top" align="right" iconType="circle" wrapperStyle={{ fontSize: '10px', paddingBottom: '10px' }} />
-                    {categories.map(cat => (
-                      <Bar 
-                        key={cat.id} 
-                        dataKey={cat.id} 
-                        name={cat.name} 
-                        fill={cat.color} 
-                        stackId="a" 
-                        radius={[2, 2, 0, 0]} 
-                      />
-                    ))}
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={categoryTrends}>
-                    <defs>
-                      <linearGradient id={`colorGrad-${selectedCatId}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={categories.find(c => c.id === selectedCatId)?.color || '#6366f1'} stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor={categories.find(c => c.id === selectedCatId)?.color || '#6366f1'} stopOpacity={0.0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="month" axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} dy={10} />
-                    <YAxis axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} tickFormatter={(v) => `${v/1000}k`} />
-                    <Tooltip 
-                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', padding: '12px' }}
-                      formatter={(v: number) => [formatCurrency(v), categories.find(c => c.id === selectedCatId)?.name || 'Jumlah']}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey={selectedCatId} 
-                      stroke={categories.find(c => c.id === selectedCatId)?.color || '#6366f1'} 
-                      strokeWidth={3}
-                      fillOpacity={1} 
-                      fill={`url(#colorGrad-${selectedCatId})`} 
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+        <div className="flex flex-wrap items-center gap-1.5 bg-slate-50/50 p-2.5 rounded-xl border border-slate-100">
+          <span className="text-xs font-extrabold text-slate-400 uppercase tracking-wider mr-2 ml-1">Kategori:</span>
+          <button
+            onClick={() => setSelectedCatId('all')}
+            className={cn(
+              "px-3 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer",
+              selectedCatId === 'all'
+                ? "bg-indigo-600 border-indigo-600 text-white shadow-sm"
+                : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100"
+            )}
+          >
+            Semua Kategori
+          </button>
+          {categories.map(cat => (
+            <button
+              key={cat.id}
+              onClick={() => setSelectedCatId(cat.id)}
+              className={cn(
+                "px-3 py-1.5 text-xs font-bold rounded-lg border transition-all cursor-pointer flex items-center gap-1.5",
+                selectedCatId === cat.id
+                  ? "text-white shadow-sm"
+                  : "bg-white border-slate-200 text-slate-600 hover:bg-slate-100"
               )}
-            </div>
-          </div>
-
-          {/* Stats Summary Sidebar */}
-          <div className="lg:col-span-4 flex flex-col justify-between space-y-4 bg-slate-50 p-5 rounded-xl border border-slate-100">
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Ringkasan Tren</span>
-              <h4 className="text-sm font-extrabold text-slate-800 mt-0.5">{categoryStats.categoryName}</h4>
-            </div>
-
-            <div className="space-y-3 flex-1 flex flex-col justify-center">
-              <div className="bg-white p-3 rounded-lg border border-slate-200/50 shadow-xs">
-                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Total Pengeluaran</p>
-                <p className="text-base font-extrabold text-slate-800 mt-0.5">{formatCurrency(categoryStats.totalSpent)}</p>
-              </div>
-
-              <div className="bg-white p-3 rounded-lg border border-slate-200/50 shadow-xs">
-                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Rata-rata Pengeluaran</p>
-                <p className="text-base font-extrabold text-indigo-700 mt-0.5">{formatCurrency(categoryStats.averageMonthly)}</p>
-              </div>
-
-              <div className="bg-white p-3 rounded-lg border border-slate-200/50 shadow-xs">
-                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Bulan Terboros</p>
-                <p className="text-xs font-bold text-slate-800 mt-0.5 truncate">{categoryStats.peakMonthLabel}</p>
-                {categoryStats.peakMonthValue > 0 && (
-                  <p className="text-[10px] font-semibold text-rose-600">({formatCurrency(categoryStats.peakMonthValue)})</p>
-                )}
-              </div>
-            </div>
-          </div>
+              style={{
+                backgroundColor: selectedCatId === cat.id ? cat.color : undefined,
+                borderColor: selectedCatId === cat.id ? cat.color : undefined,
+              }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-current" />
+              {cat.name}
+            </button>
+          ))}
         </div>
+ 
+         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+           {/* Chart Wrapper */}
+           <div className="lg:col-span-8">
+             <div className="h-80 w-full">
+               {categoryTrends.length === 0 ? (
+                 <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                   <span className="text-sm font-medium">Belum ada data transaksi</span>
+                 </div>
+               ) : selectedCatId === 'all' ? (
+                 <ResponsiveContainer width="100%" height="100%">
+                   <BarChart data={categoryTrends}>
+                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                     <XAxis dataKey="month" axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} dy={10} />
+                     <YAxis axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} tickFormatter={(v) => `${v/1000}k`} />
+                     <Tooltip 
+                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', padding: '12px' }}
+                       formatter={(v: number, name: string) => {
+                         const cat = categories.find(c => c.id === name);
+                         return [formatCurrency(v), cat ? cat.name : name];
+                       }}
+                     />
+                     <Legend verticalAlign="top" align="right" iconType="circle" wrapperStyle={{ fontSize: '10px', paddingBottom: '10px' }} />
+                     {categories.map(cat => (
+                       <Bar 
+                         key={cat.id} 
+                         dataKey={cat.id} 
+                         name={cat.name} 
+                         fill={cat.color} 
+                         stackId="a" 
+                         radius={[2, 2, 0, 0]} 
+                       />
+                     ))}
+                   </BarChart>
+                 </ResponsiveContainer>
+               ) : (
+                 <ResponsiveContainer width="100%" height="100%">
+                   <AreaChart data={categoryTrends}>
+                     <defs>
+                       <linearGradient id={`colorGrad-${selectedCatId}`} x1="0" y1="0" x2="0" y2="1">
+                         <stop offset="5%" stopColor={categories.find(c => c.id === selectedCatId)?.color || '#6366f1'} stopOpacity={0.3}/>
+                         <stop offset="95%" stopColor={categories.find(c => c.id === selectedCatId)?.color || '#6366f1'} stopOpacity={0.0}/>
+                       </linearGradient>
+                     </defs>
+                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                     <XAxis dataKey="month" axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} dy={10} />
+                     <YAxis axisLine={false} tickLine={false} fontSize={10} tick={{ fill: '#64748b' }} tickFormatter={(v) => `${v/1000}k`} />
+                     <Tooltip 
+                       contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)', padding: '12px' }}
+                       formatter={(v: number) => [formatCurrency(v), categories.find(c => c.id === selectedCatId)?.name || 'Jumlah']}
+                     />
+                     <Area 
+                       type="monotone" 
+                       dataKey={selectedCatId} 
+                       stroke={categories.find(c => c.id === selectedCatId)?.color || '#6366f1'} 
+                       strokeWidth={3}
+                       fillOpacity={1} 
+                       fill={`url(#colorGrad-${selectedCatId})`} 
+                     />
+                   </AreaChart>
+                 </ResponsiveContainer>
+               )}
+             </div>
+           </div>
+ 
+           {/* Stats Summary Sidebar */}
+           <div className="lg:col-span-4 flex flex-col justify-between space-y-4 bg-slate-50 p-5 rounded-xl border border-slate-100">
+             <div>
+               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Ringkasan Tren</span>
+               <h4 className="text-sm font-extrabold text-slate-800 mt-0.5">{categoryStats.categoryName}</h4>
+             </div>
+ 
+             <div className="space-y-3 flex-1 flex flex-col justify-center">
+               <div className="bg-white p-3 rounded-lg border border-slate-200/50 shadow-xs">
+                 <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Total Pengeluaran</p>
+                 <p className="text-base font-extrabold text-slate-800 mt-0.5">{formatCurrency(categoryStats.totalSpent)}</p>
+               </div>
+ 
+               <div className="bg-white p-3 rounded-lg border border-slate-200/50 shadow-xs">
+                 <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Rata-rata Bulanan</p>
+                 <p className="text-base font-extrabold text-indigo-600 mt-0.5">{formatCurrency(categoryStats.averageMonthlyValue)}</p>
+               </div>
+ 
+               <div className="bg-white p-3 rounded-lg border border-slate-200/50 shadow-xs">
+                 <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">Rata-rata Harian</p>
+                 <p className="text-base font-extrabold text-indigo-700 mt-0.5">{formatCurrency(categoryStats.averageDailyValue)}</p>
+                 {false && (
+                   <p className="text-[10px] font-semibold text-rose-600">()</p>
+                 )}
+               </div>
+             </div>
+           </div>
+         </div>
       </div>
 
       <div className="bg-white overflow-x-auto rounded-2xl border border-slate-200 shadow-sm">
